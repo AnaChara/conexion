@@ -1,6 +1,7 @@
+// models/venta.dart
 class Venta {
   final int?      idVenta;
-  final DateTime  fecha;       // ← ahora es DateTime
+  final DateTime  fecha;
   final int       idcliente;
   final String    folio;
   final int       idchofer;
@@ -35,10 +36,25 @@ class Venta {
       return double.tryParse(v.toString()) ?? 0.0;
     }
 
+    // 1) Extraemos el valor crudo de 'fecha' del Map
+    final dynamic rawFecha = m['fecha'];
+
+    // 2) Convertimos rawFecha a DateTime, según su tipo
+    DateTime fecha;
+    if (rawFecha is String) {
+      // Si viene como String (ej. "2025-06-03T10:00:00"), usamos DateTime.parse
+      fecha = DateTime.parse(rawFecha);
+    } else if (rawFecha is num) {
+      // Si viene como número (milisegundos desde epoch), usamos fromMillisecondsSinceEpoch
+      fecha = DateTime.fromMillisecondsSinceEpoch(rawFecha.toInt());
+    } else {
+      // Por si acaso viene null o algo inesperado, hacemos un fallback (o lanza excepción)
+      fecha = DateTime.tryParse(rawFecha.toString()) ?? DateTime.now();
+    }
+
     return Venta(
       idVenta: m['idVenta'] != null ? parseInt(m['idVenta']) : null,
-      // parseamos el TEXT SQLite a DateTime
-      fecha: DateTime.parse(m['fecha'] as String),
+      fecha: fecha,
       idcliente: parseInt(m['idcliente']),
       folio: m['folio'] as String,
       idchofer: parseInt(m['idchofer']),
@@ -48,22 +64,21 @@ class Venta {
           ? parseDouble(m['pagoRecibido'])
           : null,
       clienteNombre: m['clienteNombre'] as String? ?? '',
-      metodoPago:    m['metodoPago']    as String? ?? 'N/A',
-      cambio:       m['cambio'] != null
+      metodoPago:    m['metodoPago']   as String? ?? 'N/A',
+      cambio: m['cambio'] != null
           ? parseDouble(m['cambio'])
           : null,
     );
   }
 
+
   Map<String, dynamic> toMap() => {
-    'idVenta':    idVenta,
-    // si vuelves a guardar fecha, puedes usar:
-    // 'fecha': fecha.toIso8601String(),
-    'idcliente':  idcliente,
-    'folio':      folio,
-    'idchofer':   idchofer,
-    'total':      total,
-    'idpago':     idpago,
+    'fecha':        fecha.millisecondsSinceEpoch,
+    'idcliente':    idcliente,
+    'folio':        folio,
+    'idchofer':     idchofer,
+    'total':        total,
+    'idpago':       idpago,
     'pagoRecibido': pagoRecibido,
   };
 }

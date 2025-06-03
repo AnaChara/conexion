@@ -184,7 +184,10 @@ class _ventasState extends State<ventas> with AutomaticKeepAliveClientMixin<vent
                                   ],
                                 ),
                                 onTap: () => Navigator.push(context,
-                                    MaterialPageRoute(builder: (_) => DetalleVentaPage(venta: venta))
+                                    MaterialPageRoute(builder: (_) => DetalleVentaPage(
+                                        venta: venta,
+                                      showSolicitudDevolucion: true,
+                                    ))
                                 )
                             ),
                           ),
@@ -211,10 +214,21 @@ class _ventasState extends State<ventas> with AutomaticKeepAliveClientMixin<vent
 
 class DetalleVentaPage extends StatelessWidget {
   final Venta venta;
-  const DetalleVentaPage({Key? key, required this.venta}) : super(key: key);
+  final bool showSolicitudDevolucion;
+  const DetalleVentaPage({
+    Key? key,
+    required this.venta,
+    this.showSolicitudDevolucion = false,
+  }) : super(key: key);
 
   double _toDoubleSafe(dynamic n) =>
       (n as num?)?.toDouble() ?? 0.0;
+
+  void _imprimirRecibo(Venta venta, List<VentaDetalle> detalles) {
+    // Aquí implementas tu lógica de impresión, por ejemplo
+    // generar un PDF o enviar a impresora desde esta función.
+  }
+
 
 
   @override
@@ -233,6 +247,43 @@ class DetalleVentaPage extends StatelessWidget {
           backgroundColor: Color(0xFFF4F4F4),
           appBar: AppBar(
             title: Text('Detalles de Venta'),
+            leading: IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () async {
+                final cerrar = await showDialog<bool>(
+                    context: context,
+                    builder: (context) =>
+                        AlertDialog(
+                          title: const Text('Salir de la venta'),
+                          content:
+                          const Text('¿Estás seguro de que quieres salir? '),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(false),
+                              child: const Text('Cancelar'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(true),
+                              child: const Text('Sí'),
+                            ),
+                          ],
+                        )
+                );
+                // Si el usuario confirmó, cerrar pasando true:
+                if (cerrar == true) {
+                  Navigator.of(context).pop(true);
+                }
+              },
+            ),
+            actions: [
+              if (!showSolicitudDevolucion)
+              IconButton(
+                icon: const Icon(Icons.print),
+                onPressed: () {
+                  _imprimirRecibo(venta, detalles);
+                },
+              ),
+            ],
           ),
           body: Padding(
               padding: const EdgeInsets.all(16.0),
@@ -459,24 +510,22 @@ class DetalleVentaPage extends StatelessWidget {
         style: TextStyle(fontSize: 16), textAlign: TextAlign.center,
         ),
         SizedBox(height: 48),
-
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Color(0xFF479D8D),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.zero,
-                  ),
-                ),
-                onPressed: () {
-                  // lógica devolución
-                },
-                child: Text('Solicitar devolución'),
-              )
-            ],
-          ),
+          if(showSolicitudDevolucion) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                ElevatedButton(
+                    onPressed: (){},
+                    style:  ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF479D8D),
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.zero,
+                      ),
+                    ),
+                child: const Text('Solicitar devolución'),)
+              ],
+            )
+          ]
         ]
         )
             ),

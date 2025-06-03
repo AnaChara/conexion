@@ -71,11 +71,15 @@ class _inicioState extends State<inicio> {
     UsuarioActivo.nombre = usuario['nombre'] as String?;
     UsuarioActivo.correo = usuario['correo'] as String?;
 
+
     // 3) Busca el chofer en local (ChoferService)
     final Chofer? choferLocal = await ChoferService.obtenerUsuarioLocal(correo);
     if (choferLocal == null) {
       return _mostrarError('Este usuario no está registrado localmente');
     }
+    //Asignamos el id del chofer
+    UsuarioActivo.idChofer = choferLocal.idChofer;
+
 
     // 4) Si es admin, saltamos verificación de dispositivo
     if (tipo == 'admin') {

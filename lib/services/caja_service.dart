@@ -20,9 +20,44 @@ class CajaService {
 
   static Future<Caja?> obtenerCajaPorQR(String qr) async {
     final db = await DBProvider.getDatabase();
-    final resultado = await db.query('CajasFolioChofer', where: 'qr = ?', whereArgs: [qr]);
-    return resultado.isNotEmpty ? Caja.fromMap(resultado.first) : null;
+
+    // 1) Primero: busco en local
+    final local = await db.query(
+      'CajasFolioChofer',
+      where: 'qr = ?',
+      whereArgs: [qr],
+    );
+    if (local.isNotEmpty) {
+      return Caja.fromMap(local.first);
+    }
+
+    // 2) Si no existe localmente, voy al servidor
+    try {
+      // Opción A: solo comprobar existencia remota
+      final existe = await qrExisteEnLaNube(qr);
+      if (!existe) return null;
+
+      //traer datos completos de la caja desde la nube
+      final remotas = await buscarCajasEnLaNube(qr);
+      if (remotas.isEmpty) return null;
+
+      final cajaRemota = remotas.first;
+
+      // 3) (Opcional) Guardar esa caja remota en local para la próxima vez
+      await db.insert(
+        'CajasFolioChofer',
+        cajaRemota.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+
+      return cajaRemota;
+    } catch (e) {
+      // Si falla la llamada remota, devolvemos null o manejamos el error a tu gusto
+      print('Error al buscar QR en la nube: $e');
+      return null;
+    }
   }
+
 
 
   static Future<bool> qrExisteEnLaNube(String qr) async {

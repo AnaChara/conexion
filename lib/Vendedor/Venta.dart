@@ -1,5 +1,8 @@
+import 'package:conexion/BD/global.dart';
+import 'package:conexion/Vendedor/Ventas.dart';
 import 'package:conexion/models/escaneodetalle.dart';
 import 'package:conexion/services/producto_service.dart';
+import 'package:conexion/services/venta_services.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -8,6 +11,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geocoding/geocoding.dart';
 
 import '../models/cliente.dart';
+import '../models/venta.dart';
+import '../models/ventadetalle.dart';
 import '../services/caja_service.dart';
 import '../services/cliente_services.dart';
 import '../services/ventadetalle_services.dart';
@@ -40,10 +45,23 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
   Caja? _cajaSeleccionada;
 
   TextEditingController _scanController = TextEditingController();
+  TextEditingController _paymentAmountController = TextEditingController();
   final _searchcliente = TextEditingController();
 
   FocusNode _focusNode = FocusNode();
   String _mensajeEscaneo = '';
+  String? _selectedPaymentMethod;
+
+  /// Devuelve la lista de opciones según el cliente seleccionado
+  List<String> get _paymentOptions {
+    final code = seleccionarcliente?.formaPago ?? 0;
+    switch (code) {
+      case 1:  return ['Efectivo'];
+      case 3:  return ['Cheque', 'Efectivo'];
+      case 99: return ['Efectivo', 'Cheque', 'Transferencia'];
+      default: return ['Crédito'];
+    }
+  }
 
   @override
   void initState(){
@@ -102,62 +120,75 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
         return false;
       }
 
-      // 2) Compruebo en ventaDetalle
-      final detalle = await VentaDetalleService.getVentaDetallePorQR(qrEscaneado);
-      if (detalle != null) {
-        final status = detalle.status;
-        if (status == 'Vendido') {
+      // 2) Traer **todos** los registros de ventaDetalle que tengan ese QR
+      final listaDetalles = await VentaDetalleService.getDetallesPorQR(qrEscaneado);
+
+      // 2.a) Verificar si ALGUNO de esos registros ya está “Vendido”
+      for (var det in listaDetalles) {
+        final statusRaw = det.status ?? '';
+        final statusNormalized = statusRaw.trim().toLowerCase();
+        if (statusNormalized == 'vendido') {
           setState(() {
             _mensajeEscaneo = 'Producto ya vendido';
-            _esExito        = false;
+            _esExito = false;
           });
           _mostrarSnack(success: false);
           return false;
         }
-
-        // 2.a) EXTRA: Compruebo duplicados
-        if (_detallesEscaneados.any((d) => d.qr == qrEscaneado)) {
-          setState(() {
-            _mensajeEscaneo = 'Ya agregaste esta caja';
-            _esExito        = false;
-          });
-          _mostrarSnack(success: false);
-          return false;
-        }
-
-        // Si llego aquí, está en detalle y NO está vendido.
-        // Extraigo idProducto, precio y descripción:
-        final idProd = detalle.idproducto;
-        final precio = await ProductoService.getUltimoPrecioProducto(idProd) ?? 0.0;
-        final desc   = await ProductoService.getDescripcionProducto(idProd) ?? '—';
-
-        // 3) Acumulo en la lista de detalles:
-        setState(() {
-          _mensajeEscaneo   = 'Caja agregada';
-          _esExito          = true;
-          _cajaSeleccionada = caja;
-
-          _detallesEscaneados.add(
-            EscaneoDetalle(
-              qr:          qrEscaneado,
-              pesoNeto:    detalle.pesoNeto,
-              descripcion: desc,
-              importe:     precio,
-            ),
-          );
-          _puedeEscanear = true;
-        });
-        _mostrarSnack(success: true);
-        return true;
       }
 
-      // 4) Si no está en ventaDetalle:
+      // 2.b) Si no hay ninguno con status='vendido', seguimos con el flujo.
+      //     (Podría haber uno con status='Sincronizado' o 'Inventario'; no bloquea.)
+
+      // 3) Compruebo duplicados en memoria (_detallesEscaneados)
+      if (_detallesEscaneados.any((d) => d.qr == qrEscaneado)) {
+        setState(() {
+          _mensajeEscaneo = 'Ya agregaste esta caja';
+          _esExito        = false;
+        });
+        _mostrarSnack(success: false);
+        return false;
+      }
+
+      // 4) Aprópiate de la “primera” fila para tomar pesoNeto, idproducto, etc.
+      VentaDetalle baseDetalle;
+      if (listaDetalles.isNotEmpty) {
+        baseDetalle = listaDetalles.first;
+      } else {
+        // Si no existe en ventaDetalle (ni con status=Sincronizado ni Inventario),
+        // decides si lo bloqueas o no. Aquí asumimos que debe regresar “no disponible”:
+        setState(() {
+          _mensajeEscaneo = 'No disponible en ventaDetalle';
+          _esExito        = false;
+        });
+        _mostrarSnack(success: false);
+        return false;
+      }
+
+      // 5) Obtener precio y descripción según idproducto
+      final idProd = baseDetalle.idproducto;
+      final precio = await ProductoService.getUltimoPrecioProducto(idProd) ?? 0.0;
+      final desc   = await ProductoService.getDescripcionProducto(idProd) ?? '—';
+
+      // 6) Agregarlo a la lista local de escaneados
       setState(() {
-        _mensajeEscaneo = 'No disponible en ventaDetalle';
-        _esExito        = false;
+        _mensajeEscaneo   = 'Caja agregada';
+        _esExito          = true;
+        _cajaSeleccionada = caja;
+        _detallesEscaneados.add(
+          EscaneoDetalle(
+            qr:          qrEscaneado,
+            pesoNeto:    baseDetalle.pesoNeto,
+            descripcion: desc,
+            importe:     precio,
+            idproducto:  baseDetalle.idproducto,
+          ),
+        );
+        _puedeEscanear = true;
       });
-      _mostrarSnack(success: false);
-      return false;
+      _mostrarSnack(success: true);
+      print('>>> Escaneo agregado: qr="$qrEscaneado"');
+      return true;
     } catch (e) {
       print('Error al procesar escaneo: $e');
       setState(() {
@@ -168,7 +199,6 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
       return false;
     }
   }
-
 
 // Esto es para filtrar los clientes
   void _onSearchChanged(String q) {
@@ -198,6 +228,7 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
   }
 
 
+
 // Cuando se selecciona un cliente para mantener sus datos
   void _onClientTap(Cliente client) {
     setState(() {
@@ -205,6 +236,9 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
       filtroclientes     = [];
       _searchcliente.text = client.nombreCliente;
     });
+    print('💡 Cliente seleccionado: ${seleccionarcliente!.nombreCliente}, '
+        'formaPago raw = ${seleccionarcliente!.formaPago} '
+        '(${seleccionarcliente!.formaPago.runtimeType})');
   }
 
   @override
@@ -220,6 +254,38 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
     super.build(context);
     final sessionController = Provider.of<SessionController>(context, listen: false);
     sessionController.resetInactivityTimer(context);
+
+    //Calcular el total y el monto pagado
+    final totalVenta = _detallesEscaneados
+        .map((d) => d.importe)
+        .fold(0.0, (sum, x) => sum + x);
+    final pagoEnEfectivo = double.tryParse(
+        _paymentAmountController.text.replaceAll(',', '.')
+    ) ?? 0.0;
+
+
+    // 1) Primero, calculamos el total en centavos:
+    final totalCentavos = _detallesEscaneados
+        .map((d) => (d.importe * 100).round())    // cada d.importe → número de centavos
+        .fold(0, (suma, cent) => suma + cent);
+    // 2) Convertimos totalCentavos a double para mostrar:
+    final total = totalCentavos / 100.0;
+
+    // Si el usuario escribe, por ejemplo, "200" o "200.00" o "200,00":
+    final recibidoDouble = double.tryParse(
+        _paymentAmountController.text.replaceAll(',', '.')
+    ) ?? 0.0;
+
+    // Convertimos a centavos:
+    final recibidoCentavos = (recibidoDouble * 100).round();
+
+    // Ahora restamos en enteros:
+    final cambioCentavos = recibidoCentavos - totalCentavos;
+
+    // Si quieres mostrar cambio negativo como 0.00, puedes:
+    // final cambioCentavosDisplay = cambioCentavos < 0 ? 0 : cambioCentavos;
+    // Pero aquí asumiremos que permitimos negativos si el cliente pagó menos.
+    final cambioDisplay = cambioCentavos / 100.0;
 
     return GestureDetector(
       onTap: () {
@@ -475,43 +541,7 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                                   ),
                                 );
                               }).toList(),
-                            if (_modoEdicion && _seleccionados.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8.0),
-                                child: ElevatedButton.icon(
-                                  icon: Icon(Icons.delete_sweep),
-                                  label: Text('Eliminar ${_seleccionados.length}'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                  ),
-                                  onPressed: () {
-                                    setState(() {
-                                      // eliminamos de mayor a menor índice
-                                      final indices = _seleccionados.toList()..sort((a, b) => b - a);
-                                      for (var idx in indices) {
-                                        _detallesEscaneados.removeAt(idx);
-                                      }
-                                      _seleccionados.clear();
-                                      _modoEdicion = false;
-                                    });
-                                  },
-                                ),
-                              ),
-                            Divider(),
-                            // ── Total ──
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                Text(
-                                  'Total: \$${_detallesEscaneados
-                                      .map((d) => d.importe)
-                                      .fold(0.0, (sum, x) => sum + x)
-                                      .toStringAsFixed(2)}',
-                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: 8),
+                            SizedBox(height: 12,),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
@@ -522,7 +552,7 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                                 ),
                                 ElevatedButton.icon(
                                   icon: Icon(Icons.qr_code_scanner),
-                                  label: Text('Escanear otra'),
+                                  label: Text('Agregar'),
                                   onPressed: () {
                                     setState(() {
                                       _mensajeEscaneo   = '';
@@ -534,12 +564,251 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                                 ),
                               ],
                             ),
+                            Divider(),
+                            // ── Total ──
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                Text(
+                                  'Total: \$${ (totalCentavos / 100.0).toStringAsFixed(2) }',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+
+                            // ─── Aquí va el dropdown de forma de pago, tras haber escaneado al menos una caja ───
+                            if (_detallesEscaneados.isNotEmpty) ...[
+                              SizedBox(height: 16),
+
+                              Text('Forma de pago:', style: TextStyle(fontWeight: FontWeight.bold)),
+                              DropdownButton<String>(
+                                isExpanded: true,
+                                hint: Text('Selecciona método'),
+                                value: _selectedPaymentMethod,
+                                items: _paymentOptions
+                                    .map((m) => DropdownMenuItem(value: m, child: Text(m)))
+                                    .toList(),
+                                onChanged: (m) => setState(() {
+                                  _selectedPaymentMethod = m;
+                                  _paymentAmountController.clear();
+                                }),
+                              ),
+
+                              if (_selectedPaymentMethod == 'Efectivo') ...[
+                                SizedBox(height: 12),
+                                TextField(
+                                  controller: _paymentAmountController,
+                                  keyboardType: TextInputType.numberWithOptions(decimal: true),
+                                  decoration: InputDecoration(
+                                    labelText: 'Monto recibido',
+                                    prefixText: '\$ ',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  onChanged: (_) => setState(() {}),
+                                ),
+                                SizedBox(height: 8),
+                                if (recibidoCentavos <
+                                    totalCentavos)
+                                  Text(
+                                    'Monto insuficiente',
+                                    style: TextStyle(
+                                        color: Colors.red,
+                                        fontWeight:
+                                        FontWeight.bold),
+                                  )
+                                else
+                                  Text(
+                                    'Cambio: \$${cambioDisplay.toStringAsFixed(2)}',
+                                    style: TextStyle(
+                                        fontWeight:
+                                        FontWeight.bold),
+                                  ),
+                              ],
+                            ],
+
+                            if (_modoEdicion && _seleccionados.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8.0),
+                                child: ElevatedButton.icon(
+                                  icon: Icon(Icons.delete_sweep),
+                                  label: Text('Eliminar ${_seleccionados.length}'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                  ),
+                                  onPressed: () async {
+                                    final confirmar = await showDialog<bool>(
+                                        context: context,
+                                        builder: (_) => AlertDialog(
+                                          title: Text('Confrimar eliminación'),
+                                          content: Text('¿Estás seguro de eliminar '
+                                          '${_seleccionados.length} caja(s)?'),
+                                          actions: [
+                                            TextButton(
+                                                onPressed: ()=> Navigator.of(context).pop(false),
+                                                child: Text('Cancelar')),
+                                            TextButton(
+                                                onPressed: () => Navigator.of(context).pop(true),
+                                                child: Text('Eliminar'),
+                                            )
+                                          ],
+                                        ),
+                                    );
+                                    //si el usuario confirma, se borra
+                                    if (confirmar == true){
+                                      setState(() {
+                                        final indices = _seleccionados.toList()
+                                          ..sort((a, b) => b - a);
+                                        for (var idx in indices) {
+                                          _detallesEscaneados.removeAt(idx);
+                                        }
+                                        _seleccionados.clear();
+                                        _modoEdicion = false;
+                                      });
+                                    }
+                                  },
+                                ),
+                              ),
+                            SizedBox(height: 8),
                           ],
                         ),
                       ),
                     ),
                   ],
+                  if (_selectedPaymentMethod != null &&
+                      (
+                          (_selectedPaymentMethod == 'Efectivo' && pagoEnEfectivo >= totalVenta)
+                              || (_selectedPaymentMethod != 'Efectivo')
+                      )
+                  )
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16.0),
+                      child: ElevatedButton.icon(
+                        icon: Icon(Icons.check_circle_outline),
+                        label: Text('Finalizar Venta'),
+                        style: ElevatedButton.styleFrom(
+                          minimumSize: Size(double.infinity, 48),
+                        ),
+                        onPressed: () {
+                          showDialog(
+                              context: context,
+                              barrierDismissible: false,
+                              builder: (BuildContext dialogContext){
+                                return AlertDialog(
+                                  title: Text('Confirmar'),
+                                  content: Text('¿Finalizar venta?'),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: (){
+                                          Navigator.of(dialogContext).pop();
+                                        },
+                                        child: Text('Cancelar'),
+                                    ),
+                                    TextButton(
+                                        onPressed: () async {
+                                          Navigator.of(dialogContext).pop();
 
+                                          // 1) Genera el folio ANTES de crear el objeto Venta
+                                          final nuevoFolio = 'F${DateTime.now().millisecondsSinceEpoch}';
+
+                                          // 2) Crear el objeto Venta con los datos de pantalla:
+                                          final ventaObj = Venta(
+                                            fecha:        DateTime.now(),
+                                            idcliente:    seleccionarcliente!.idcliente,
+                                            folio:        nuevoFolio,
+                                            idchofer:     UsuarioActivo.idChofer!,
+                                            total:        totalVenta,
+                                            idpago:       (_selectedPaymentMethod == 'Efectivo')
+                                                ? 1
+                                                : (_selectedPaymentMethod == 'Cheque')
+                                                ? 2
+                                                : 3,
+                                            pagoRecibido: (_selectedPaymentMethod == 'Efectivo')
+                                                ? pagoEnEfectivo
+                                                : null,
+                                            clienteNombre: seleccionarcliente!.nombreCliente,
+                                            metodoPago:    _selectedPaymentMethod!,
+                                            cambio:        (_selectedPaymentMethod == 'Efectivo')
+                                                ? (pagoEnEfectivo - totalVenta)
+                                                : null,
+                                          );
+
+                                          // 3) Insertar en BD y obtener el id autogenerado:
+                                          final nuevoId = await VentaService.insertarVenta(ventaObj);
+
+                                          // 4) “Reconstruir” Venta con el idVenta asignado (opcional, pero útil para detalle):
+                                          final ventaConID = Venta(
+                                            idVenta:     nuevoId,
+                                            fecha:        ventaObj.fecha,
+                                            idcliente:    ventaObj.idcliente,
+                                            folio:        nuevoFolio,
+                                            idchofer:     ventaObj.idchofer,
+                                            total:        ventaObj.total,
+                                            idpago:       ventaObj.idpago,
+                                            pagoRecibido: ventaObj.pagoRecibido,
+                                            clienteNombre: ventaObj.clienteNombre,
+                                            metodoPago:    ventaObj.metodoPago,
+                                            cambio:        ventaObj.cambio,
+                                          );
+
+                                          // 5) Insertar cada detalle de venta con el mismo idVenta y status='Vendido'
+                                          for (final d in _detallesEscaneados) {
+                                            final detalle = VentaDetalle(
+                                              qr:         d.qr,
+                                              pesoNeto:   d.pesoNeto,
+                                              subtotal:   d.importe,
+                                              status:     'Vendido',          // <- Aquí seteamos el status a “Vendido”
+                                              idproducto: d.idproducto,
+                                              folio:      nuevoFolio,
+                                              descripcion: d.descripcion,
+                                              idVenta:    nuevoId,
+                                            );
+                                            await VentaDetalleService.insertarDetalle(detalle);
+                                          }
+
+                                          // 6) Aquí llamas para imprimir justo lo que acabas de guardar
+                                          final ultimaVenta = await VentaService.obtenerUltimaVenta();
+
+                                          //7) Despues de insertar todo, nacegar a detalleVenta
+                                          Navigator.push<bool>(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) => DetalleVentaPage(
+                                                venta: ventaConID,
+                                                showSolicitudDevolucion: false, // o true, según dónde la llames
+                                              ),
+                                            ),
+                                          ).then((devolverTrue) {
+                                            if (devolverTrue == true) {
+                                              // NOTIFICAR al provider que hay una venta nueva:
+                                              //limpiar todo
+                                              setState(() {
+                                                _detallesEscaneados.clear();
+                                                seleccionarcliente = null;
+                                                _selectedPaymentMethod = null;
+                                                _paymentAmountController.clear();
+                                                _cajaSeleccionada = null;
+                                                _mensajeEscaneo = '';
+                                                _showScanner = false;
+                                                _puedeEscanear = true;
+                                                _modoEscaneoActivo = false;
+                                                _modoEdicion = false;
+                                                _seleccionados.clear();
+                                                // Si tienes otros campos que quieras reiniciar, agrégalos aquí:
+                                                _scanController.clear();
+                                                _searchcliente.clear();
+                                              });
+                                            }
+                                          });
+                                        },
+                                        child: Text('Continuar')
+                                    )
+                                  ],
+                                );
+                              }
+                          );
+                        },
+                      ),
+                    ),
                 ],
               ],
             ),

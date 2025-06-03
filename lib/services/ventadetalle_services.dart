@@ -92,4 +92,35 @@ class VentaDetalleService {
       whereArgs: [idvd],
     );
   }
+
+  // Datos insertados en ventadetalle
+  static Future<List<Map<String, dynamic>>> obtenerTodosLosDetallesComoMap() async {
+    final db = await DBProvider.getDatabase();
+    return await db.query(
+      'ventaDetalle',
+      orderBy: 'idvd ASC', // opcional: orden por idvd ascendente
+    );
+  }
+
+  static Future<List<VentaDetalle>> getDetallesPorQR(String qrBuscado) async {
+    final db = await DBProvider.getDatabase();
+    final resultados = await db.query(
+      'ventaDetalle',  // Nombre real de tu tabla
+      columns: [
+        'idvd',
+        'idVenta',
+        'qr',
+        'pesoNeto',    // Asegúrate de usar exactamente tu nombre de columna
+        'subtotal',
+        'status',
+        'idproducto',
+        'folio',
+      ],
+      where: 'qr = ?',      // Filtramos por QR
+      whereArgs: [qrBuscado],
+    );
+    return resultados.map((m) => VentaDetalle.fromMap(m)).toList();
+  }
+
+
 }
