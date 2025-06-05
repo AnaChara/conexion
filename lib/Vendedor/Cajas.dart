@@ -117,93 +117,97 @@ with AutomaticKeepAliveClientMixin{
   }
 
   Future<bool> _procesarEscaneo(String qrEscaneado) async {
-    try {
-      // 1) Validación básica
-      debugPrint('➡️ Empezando escaneo de: $qrEscaneado');
-      final cleaned = qrEscaneado.replaceAll(RegExp(r'[^0-9.]'), '');
-      if (cleaned.length != 29) {
+    setState(() => cargando = true);
+    _mensajeEscaneo = 'Guardando caja…';
+
+    setState(() => cargando = true);
+      try {
+        // 1) Validación básica
+        debugPrint('➡️ Empezando escaneo de: $qrEscaneado');
+        final cleaned = qrEscaneado.replaceAll(RegExp(r'[^0-9.]'), '');
+        if (cleaned.length != 29) {
+          setState(() {
+            _mensajeEscaneo = 'Su QR debe contener 29 caracteres';
+            _esExito = false;
+          });
+          return false;
+        }
+
+        // 2) ¿Ya existe en local?
+        final Caja? existente = await CajaService.obtenerCajaPorQR(qrEscaneado);
+        if (existente != null) {
+          setState(() {
+            _mensajeEscaneo = 'Este código QR ya está registrado';
+            _esExito = false;
+          });
+          return false;
+        }
+
+        // 3) ¿Ya existe en la nube?
+        if (await CajaService.qrExisteEnLaNube(qrEscaneado)) {
+          setState(() {
+            _mensajeEscaneo = 'Este código QR ya está registrado en la nube';
+            _esExito = false;
+          });
+          return false;
+        }
+
+        // 4) Crear y guardar el modelo Caja
+        final nuevaCaja = Caja(
+          id: DateTime.now().millisecondsSinceEpoch,
+          createe: DateTime.now().millisecondsSinceEpoch,
+          qr: qrEscaneado,
+          folio: 'sv250501.1',
+          sync: 0,
+          fechaEscaneo: DateTime.now().toIso8601String(),
+        );
+        await CajaService.insertarCajaFolioChofer(nuevaCaja);
+        debugPrint('✅ Caja almacenada: ${nuevaCaja.qr}');
+
+        // 5) Parsear datos del QR
+        final datosQr  = parseQrData(qrEscaneado);
+        final pesoNeto = double.parse(datosQr['neto']!);
+        final subtotal = double.parse(datosQr['subtotal']!);
+        final folioSim = datosQr['folio']!;
+
+        // 6) Obtener precio con el servicio
+        final idProd = _pickRandomId();
+        final precio = await ProductoService.getUltimoPrecioProducto(idProd) ?? 0.0;
+
+        // 7) Crear y guardar el modelo VentaDetalle
+        final detalle = VentaDetalle(
+          idvd: null,
+          idVenta: null,
+          qr: qrEscaneado,
+          pesoNeto: pesoNeto,
+          subtotal: subtotal,
+          status: 'Inventario',
+          idproducto: idProd,
+          folio: folioSim,
+        );
+        await VentaDetalleService.insertarDetalle(detalle);
+        debugPrint('💾 Insertando VentaDetalle: idProd=$idProd subtotal=$subtotal');
+
+        // 8) Recargar la lista local
+        await cargarDatosLocales();
+
         setState(() {
-          _mensajeEscaneo = 'Su QR debe contener 29 caracteres';
-          _esExito = false;
+          _mensajeEscaneo = 'Escaneo exitoso';
+          _esExito        = true;
+          _scanController.clear();
+        });
+        return true;
+        debugPrint('✅ _procesarEscaneo terminó sin excepción');
+      } catch (e, st) {
+        debugPrint('‼️ Error en _procesarEscaneo: $e');
+        debugPrint('$st');
+        setState(() {
+          _mensajeEscaneo = 'Error al procesar escaneo';
+          _esExito        = false;
+          _scanController.clear();
         });
         return false;
       }
-
-      // 2) ¿Ya existe en local?
-      final Caja? existente = await CajaService.obtenerCajaPorQR(qrEscaneado);
-      if (existente != null) {
-        setState(() {
-          _mensajeEscaneo = 'Este código QR ya está registrado';
-          _esExito = false;
-        });
-        return false;
-      }
-
-      // 3) ¿Ya existe en la nube?
-      if (await CajaService.qrExisteEnLaNube(qrEscaneado)) {
-        setState(() {
-          _mensajeEscaneo = 'Este código QR ya está registrado en la nube';
-          _esExito = false;
-        });
-        return false;
-      }
-
-      // 4) Crear y guardar el modelo Caja
-      final nuevaCaja = Caja(
-        id: DateTime.now().millisecondsSinceEpoch,
-        createe: DateTime.now().millisecondsSinceEpoch,
-        qr: qrEscaneado,
-        folio: 'sv250501.1',
-        sync: 0,
-        fechaEscaneo: DateTime.now().toIso8601String(),
-      );
-      await CajaService.insertarCajaFolioChofer(nuevaCaja);
-      debugPrint('✅ Caja almacenada: ${nuevaCaja.qr}');
-
-      // 5) Parsear datos del QR
-      final datosQr  = parseQrData(qrEscaneado);
-      final pesoNeto = double.parse(datosQr['neto']!);
-      final subtotal = double.parse(datosQr['subtotal']!);
-      final folioSim = datosQr['folio']!;
-
-      // 6) Obtener precio con el servicio
-      final idProd = _pickRandomId();
-      final precio = await ProductoService.getUltimoPrecioProducto(idProd) ?? 0.0;
-
-      // 7) Crear y guardar el modelo VentaDetalle
-      final detalle = VentaDetalle(
-        idvd: null,
-        idVenta: null,
-        qr: qrEscaneado,
-        pesoNeto: pesoNeto,
-        subtotal: subtotal,
-        status: 'Inventario',
-        idproducto: idProd,
-        folio: folioSim,
-      );
-      await VentaDetalleService.insertarDetalle(detalle);
-      debugPrint('💾 Insertando VentaDetalle: idProd=$idProd subtotal=$subtotal');
-
-      // 8) Recargar la lista local
-      await cargarDatosLocales();
-
-      setState(() {
-        _mensajeEscaneo = 'Escaneo exitoso';
-        _esExito        = true;
-        _scanController.clear();
-      });
-      return true;
-      debugPrint('✅ _procesarEscaneo terminó sin excepción');
-    } catch (e, st) {
-      debugPrint('‼️ Error en _procesarEscaneo: $e');
-      debugPrint('$st');
-      setState(() {
-        _mensajeEscaneo = 'Error al procesar escaneo';
-        _esExito        = false;
-        _scanController.clear();
-      });
-      return false;
-    }
   }
 
 // Ejemplo de función auxiliar para elegir un producto
@@ -306,7 +310,20 @@ with AutomaticKeepAliveClientMixin{
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
+                decoration: cargando
+                    ? BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color.fromRGBO(128, 128, 128, 0.4),
+                      spreadRadius: 1,
+                      blurRadius: 6,
+                      offset: Offset(0, 2),
+                    )
+                  ],
+                  borderRadius: BorderRadius.circular(8),
+                )
+                    : BoxDecoration(
                   color: _esExito ? Colors.green[100] : Colors.red[100],
                   border: Border.all(
                     color: _esExito ? Colors.green : Colors.red,
