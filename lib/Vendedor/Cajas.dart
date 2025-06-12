@@ -117,38 +117,77 @@ with AutomaticKeepAliveClientMixin{
   }
 
   Future<bool> _procesarEscaneo(String qrEscaneado) async {
-    setState(() => cargando = true);
-    _mensajeEscaneo = 'Guardando caja…';
+    FocusScope.of(context).unfocus();
+    setState(() {
+      cargando = true;
+      _mensajeEscaneo = 'Guardando Caja...';
+    });
 
-    setState(() => cargando = true);
       try {
+        // Si ingresa más de 31 dígitos, limpiamos el TextField y mostramos error
+        if (qrEscaneado.length > 31) {
+          await Future.delayed(const Duration(milliseconds: 100));
+          setState(() {
+            cargando = false;
+            _mensajeEscaneo = 'El código debe tener solo 29 caracteres';
+          });
+          _scanController.clear();
+          return false;
+        }
+
         // 1) Validación básica
-        debugPrint('➡️ Empezando escaneo de: $qrEscaneado');
         final cleaned = qrEscaneado.replaceAll(RegExp(r'[^0-9.]'), '');
         if (cleaned.length != 29) {
+          if (_mensajeEscaneo == 'Su QR debe contener 29 caracteres' && !_esExito) {
+            await Future.delayed(const Duration(milliseconds: 100));
+            setState(() {
+              _mensajeEscaneo='';
+            });
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
           setState(() {
+            cargando = false;
             _mensajeEscaneo = 'Su QR debe contener 29 caracteres';
             _esExito = false;
           });
+          _scanController.clear();
           return false;
         }
 
         // 2) ¿Ya existe en local?
         final Caja? existente = await CajaService.obtenerCajaPorQR(qrEscaneado);
         if (existente != null) {
+          if (_mensajeEscaneo == 'Este código QR ya está registrado' && !_esExito) {
+            await Future.delayed(const Duration(milliseconds: 100));
+            setState(() {
+              _mensajeEscaneo = '';
+            });
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
           setState(() {
+            cargando = false;
             _mensajeEscaneo = 'Este código QR ya está registrado';
             _esExito = false;
           });
+          _scanController.clear();
           return false;
         }
 
         // 3) ¿Ya existe en la nube?
         if (await CajaService.qrExisteEnLaNube(qrEscaneado)) {
+          if (_mensajeEscaneo == 'Este código QR ya está registrado en la nube' && !_esExito) {
+            await Future.delayed(const Duration(milliseconds: 100));
+            setState(() {
+              _mensajeEscaneo = '';
+            });
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
           setState(() {
+            cargando = false;
             _mensajeEscaneo = 'Este código QR ya está registrado en la nube';
             _esExito = false;
           });
+          _scanController.clear();
           return false;
         }
 
@@ -162,36 +201,39 @@ with AutomaticKeepAliveClientMixin{
           fechaEscaneo: DateTime.now().toIso8601String(),
         );
         await CajaService.insertarCajaFolioChofer(nuevaCaja);
-        debugPrint('✅ Caja almacenada: ${nuevaCaja.qr}');
+        debugPrint('Caja almacenada: ${nuevaCaja.qr}');
 
         // 5) Parsear datos del QR
         final datosQr  = parseQrData(qrEscaneado);
         final pesoNeto = double.parse(datosQr['neto']!);
-        final subtotal = double.parse(datosQr['subtotal']!);
         final folioSim = datosQr['folio']!;
 
         // 6) Obtener precio con el servicio
         final idProd = _pickRandomId();
         final precio = await ProductoService.getUltimoPrecioProducto(idProd) ?? 0.0;
 
-        // 7) Crear y guardar el modelo VentaDetalle
+        // 7) Calcular subtotal = pesoNeto * precioPorKilo
+        final subtotalCalc = pesoNeto * precio;
+
+        // 8) Crear y guardar el modelo VentaDetalle
         final detalle = VentaDetalle(
           idvd: null,
           idVenta: null,
           qr: qrEscaneado,
           pesoNeto: pesoNeto,
-          subtotal: subtotal,
+          subtotal: subtotalCalc,
           status: 'Inventario',
           idproducto: idProd,
           folio: folioSim,
         );
         await VentaDetalleService.insertarDetalle(detalle);
-        debugPrint('💾 Insertando VentaDetalle: idProd=$idProd subtotal=$subtotal');
+        debugPrint('Insertando VentaDetalle: idProd=$idProd subtotal=$subtotalCalc');
 
         // 8) Recargar la lista local
-        await cargarDatosLocales();
+        await cargarDatosInventario(force: true);
 
         setState(() {
+          cargando = false;
           _mensajeEscaneo = 'Escaneo exitoso';
           _esExito        = true;
           _scanController.clear();
@@ -201,11 +243,25 @@ with AutomaticKeepAliveClientMixin{
       } catch (e, st) {
         debugPrint('‼️ Error en _procesarEscaneo: $e');
         debugPrint('$st');
+        if (_mensajeEscaneo == 'Error al procesar escaneo' && !_esExito) {
+          setState(() => _mensajeEscaneo = '');
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
+        // Si ya estaba mostrando exactamente ese mismo mensaje de error, lo "reseteamos" brevemente:
+        if (_mensajeEscaneo == 'Error al procesar escaneo' && !_esExito) {
+          await Future.delayed(const Duration(milliseconds: 100));
+          setState(() {
+            _mensajeEscaneo = '';
+          });
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
         setState(() {
+          cargando = false;
           _mensajeEscaneo = 'Error al procesar escaneo';
           _esExito        = false;
           _scanController.clear();
         });
+        _scanController.clear();
         return false;
       }
   }
@@ -299,9 +355,9 @@ with AutomaticKeepAliveClientMixin{
                         hintText: 'Escanea aquí...',
                         border: OutlineInputBorder(),
                       ),
-                      onSubmitted: (value){
+                      onSubmitted: (value) async {
                         //presionar enter manualmente
-                        _procesarEscaneo(value);
+                       await _procesarEscaneo(value);
                       },
                     ),
                   )
@@ -321,33 +377,34 @@ with AutomaticKeepAliveClientMixin{
                       offset: Offset(0, 2),
                     )
                   ],
+                  border: Border.all(color: Colors.grey[300]!),
                   borderRadius: BorderRadius.circular(8),
                 )
                     : BoxDecoration(
                   color: _esExito ? Colors.green[100] : Colors.red[100],
-                  border: Border.all(
-                    color: _esExito ? Colors.green : Colors.red,
-                  ),
+                  border: Border.all(color: _esExito ? Colors.green : Colors.red,),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(
-                      _esExito ? Icons.check_circle : Icons.error,
-                      color: _esExito ? Colors.green : Colors.red,
-                    ),
-                    const SizedBox(width: 8),
+                    if (!cargando)...[
+                      Icon(_esExito ? Icons.check_circle : Icons.error,
+                      color:_esExito ? Colors.green : Colors.red,),
+                      const SizedBox(width: 8,)
+                    ],
                     Expanded(
-                      child: Text(
-                        _mensajeEscaneo,
-                        style: TextStyle(
-                          color: _esExito ? Colors.green[800] : Colors.red[800],
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
+                        child: Text(
+                          cargando ? 'Guardando caja ...' : _mensajeEscaneo,
+                          style: TextStyle(
+                            color: cargando
+                                ? Colors.black
+                                :(_esExito ? Colors.green[800] : Colors.red[800]),
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        )
+                    )
                   ],
                 ),
               ),

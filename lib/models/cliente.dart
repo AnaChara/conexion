@@ -2,20 +2,22 @@ class Cliente {
   final int    idcliente;
   final String clave;
   final String nombreCliente;
-  final String? calleNumero;
+  String? calleNumero;
+  String? rfc; // ← RFC desde descripcionSubCat
   final String? parnet;
   final String? clienteGrupo;
   final int    formaPago;
   final String? latitud;
   final String? longitud;
-  final String? ciudad;
-  final String? estado;
+  String? ciudad;
+  String? estado;
 
   Cliente({
     required this.idcliente,
     required this.clave,
     required this.nombreCliente,
     this.calleNumero,
+    this.rfc,
     this.parnet,
     this.clienteGrupo,
     required this.formaPago,
@@ -25,9 +27,7 @@ class Cliente {
     this.estado,
   });
 
-  /// Para leer de SQLite
   factory Cliente.fromMap(Map<String, dynamic> m) {
-    // raw puede venir como String o num, lo normalizamos a int
     final rawPago = m['FormaPago'] ?? m['formaPago'];
     final pago = rawPago is num
         ? rawPago.toInt()
@@ -38,6 +38,7 @@ class Cliente {
       clave:         m['clave']         as String,
       nombreCliente: m['nombreCliente'] as String,
       calleNumero:   m['calleNumero']   as String?,
+      rfc:           m['RFC']           as String?, // ← leer RFC desde SQLite
       parnet:        m['parnet']        as String?,
       clienteGrupo:  m['ClienteGrupo']  as String?,
       formaPago:     pago,
@@ -48,12 +49,12 @@ class Cliente {
     );
   }
 
-  /// Para insertar/actualizar en SQLite
   Map<String, dynamic> toMap() => {
     'idcliente'     : idcliente,
     'clave'         : clave,
     'nombreCliente' : nombreCliente,
     'calleNumero'   : calleNumero,
+    'rfc'           : rfc, // ← guardar RFC en base de datos
     'parnet'        : parnet,
     'ClienteGrupo'  : clienteGrupo,
     'FormaPago'     : formaPago,
@@ -63,7 +64,6 @@ class Cliente {
     'estado'        : estado,
   };
 
-  /// Para parsear JSON de la API
   factory Cliente.fromJson(Map<String, dynamic> j) {
     final rawPago = j['FormaPago'];
     final pago = rawPago is num
@@ -76,7 +76,8 @@ class Cliente {
       clave:         codigos,
       nombreCliente: j['descripcionArt']    as String? ?? '',
       calleNumero:   j['bmp']               as String?,
-      parnet:        j['descripcionSubCat'] as String?,
+      rfc:           j['descripcionCat'] as String?, // ← asignado correctamente
+      parnet:        j['descripcionSubCat']    as String?,
       clienteGrupo:  j['descripcionCat']    as String?,
       formaPago:     pago,
       latitud:       j['latitud']           as String?,
@@ -92,6 +93,7 @@ class Cliente {
         'id: $idcliente, '
         'clave: $clave, '
         'nombre: $nombreCliente, '
+        'rfc: $rfc, '
         'formaPago: $formaPago, '
         'calle: $calleNumero, '
         'ciudad: $ciudad, '

@@ -8,6 +8,7 @@ class VentaDetalle {
   final int idproducto;
   final String folio;
   final String? descripcion;
+  final double precio;
 
   VentaDetalle({
     this.idvd,
@@ -19,6 +20,7 @@ class VentaDetalle {
     required this.idproducto,
     required this.folio,
     this.descripcion,
+    this.precio = 0.0,
   });
 
 
@@ -32,7 +34,8 @@ class VentaDetalle {
     status:    m['status']     as String,
     idproducto:(m['idproducto']as int),
     folio:     m['folio']      as String,
-      descripcion:m['descripcion'] as String?
+      descripcion:m['descripcion'] as String?,
+      precio:    (m['precio']   as num?)?.toDouble() ?? 0.0,
   );
 
   Map<String, dynamic> toMap() => {

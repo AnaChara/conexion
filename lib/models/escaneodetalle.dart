@@ -5,6 +5,7 @@ class EscaneoDetalle {
   final String descripcion;
   final double importe;
   final int idproducto;
+  
 
   EscaneoDetalle({
     required this.qr,

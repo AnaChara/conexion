@@ -22,23 +22,26 @@ class VentaService {
   static Future<List<Map<String, dynamic>>> obtenerVentasPorCorreo(String correo) async {
     final db = await DBProvider.getDatabase();
     return await db.rawQuery(r'''
-      SELECT
-        v.*,
-        c.nombreCliente    AS clienteNombre,
-        f.Describcion      AS metodoPago,
-        v.pagoRecibido     AS pagoRecibido,
-        CASE 
-          WHEN v.idpago = 1 THEN v.pagoRecibido - v.total 
-          ELSE NULL 
-        END AS cambio
-      FROM Venta v
-      LEFT JOIN Clientes   c ON v.idcliente = c.idcliente
-      LEFT JOIN formaPago  f ON v.idpago    = f.idpago
-      JOIN chofer          ch ON v.idchofer  = ch.idChofer
-      WHERE ch.Correo = ?
-      ORDER BY v.fecha DESC
-    ''', [correo]);
+    SELECT
+      v.*,
+      c.nombreCliente    AS clienteNombre,
+      c.RFC             AS rfcCliente,
+      c.calleNumero || ', ' || c.ciudad || ', ' || c.estado AS direccionCliente,
+      f.Describcion      AS metodoPago,
+      v.pagoRecibido     AS pagoRecibido,
+      CASE 
+        WHEN v.idpago = 1 THEN v.pagoRecibido - v.total 
+        ELSE NULL 
+      END AS cambio
+    FROM Venta v
+    LEFT JOIN Clientes   c ON v.idcliente = c.idcliente
+    LEFT JOIN formaPago  f ON v.idpago    = f.idpago
+    JOIN chofer          ch ON v.idchofer  = ch.idChofer
+    WHERE ch.Correo = ?
+    ORDER BY v.fecha DESC
+  ''', [correo]);
   }
+
 
   //actualizarFolio
   static Future<int> actualizarFolio(int idVenta, String folio) async {

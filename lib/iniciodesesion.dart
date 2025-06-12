@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:conexion/Vendedor/Principal.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import '../services/auth_service.dart';
@@ -30,6 +33,50 @@ class _inicioState extends State<inicio> {
   //Validar si un campo esta vacio
   bool _correovacio = false;
   bool _contvacio = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _verificarConexion();  // <–– comprobar antes de mostrar UI
+  }
+
+  Future<void> _verificarConexion() async {
+    // Pequeña espera para asegurarnos de que el contexto ya existe
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    try {
+      final result = await InternetAddress.lookup('example.com')
+          .timeout(const Duration(seconds: 5));
+      if (result.isEmpty || result[0].rawAddress.isEmpty) {
+        _mostrarDialogoSinInternet();
+      }
+    } on SocketException catch (_) {
+      _mostrarDialogoSinInternet();
+    } on TimeoutException catch (_) {
+      _mostrarDialogoSinInternet();
+    }
+  }
+
+  void _mostrarDialogoSinInternet() {
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Impide cerrar tocando fuera
+      builder: (_) => AlertDialog(
+        title: const Text('Sin conexión'),
+        content: const Text('No hay internet. La aplicación se cerrará.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              // Cierra el diálogo y sale de la app
+              Navigator.of(context).pop();
+              SystemNavigator.pop();
+            },
+            child: const Text('Salir'),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _validarCampo(){
     setState(() {

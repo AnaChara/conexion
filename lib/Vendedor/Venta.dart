@@ -11,6 +11,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geocoding/geocoding.dart';
 
 import '../models/cliente.dart';
+import '../models/detallePrecio.dart';
 import '../models/venta.dart';
 import '../models/ventadetalle.dart';
 import '../services/caja_service.dart';
@@ -41,6 +42,7 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
   List<EscaneoDetalle> _detallesEscaneados = [];
   List<Cliente> clientes = [];
   List<Cliente> filtroclientes = [];
+  List<DetalleConPrecio> _detallesConPrecio = [];
   Cliente? seleccionarcliente;
   Caja? _cajaSeleccionada;
 
@@ -120,7 +122,7 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
         return false;
       }
 
-      // 2) Traer **todos** los registros de ventaDetalle que tengan ese QR
+      // 2) Traer todos los registros de ventaDetalle que tengan ese QR
       final listaDetalles = await VentaDetalleService.getDetallesPorQR(qrEscaneado);
 
       // 2.a) Verificar si ALGUNO de esos registros ya está “Vendido”
@@ -138,8 +140,6 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
       }
 
       // 2.b) Si no hay ninguno con status='vendido', seguimos con el flujo.
-      //     (Podría haber uno con status='Sincronizado' o 'Inventario'; no bloquea.)
-
       // 3) Compruebo duplicados en memoria (_detallesEscaneados)
       if (_detallesEscaneados.any((d) => d.qr == qrEscaneado)) {
         setState(() {
@@ -170,6 +170,7 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
       final precio = await ProductoService.getUltimoPrecioProducto(idProd) ?? 0.0;
       final desc   = await ProductoService.getDescripcionProducto(idProd) ?? '—';
 
+
       // 6) Agregarlo a la lista local de escaneados
       setState(() {
         _mensajeEscaneo   = 'Caja agregada';
@@ -186,6 +187,7 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
         );
         _puedeEscanear = true;
       });
+      await cargarDetallesConPrecio();
       _mostrarSnack(success: true);
       print('>>> Escaneo agregado: qr="$qrEscaneado"');
       return true;
@@ -198,6 +200,17 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
       _mostrarSnack(success: false);
       return false;
     }
+  }
+//para obtener el precio
+  Future<void> cargarDetallesConPrecio() async {
+    _detallesConPrecio.clear();
+    for (final d in _detallesEscaneados) {
+      final precio = await ProductoService.getUltimoPrecioProducto(d.idproducto);
+      _detallesConPrecio.add(
+        DetalleConPrecio(detalle: d, precioPorKilo: precio ?? 0),
+      );
+    }
+    setState(() {}); // Para redibujar
   }
 
 // Esto es para filtrar los clientes
@@ -256,8 +269,8 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
     sessionController.resetInactivityTimer(context);
 
     //Calcular el total y el monto pagado
-    final totalVenta = _detallesEscaneados
-        .map((d) => d.importe)
+    final totalVenta = _detallesConPrecio
+        .map((d) => d.detalle.pesoNeto * d.precioPorKilo)
         .fold(0.0, (sum, x) => sum + x);
     final pagoEnEfectivo = double.tryParse(
         _paymentAmountController.text.replaceAll(',', '.')
@@ -265,8 +278,8 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
 
 
     // 1) Primero, calculamos el total en centavos:
-    final totalCentavos = _detallesEscaneados
-        .map((d) => (d.importe * 100).round())    // cada d.importe → número de centavos
+    final totalCentavos = _detallesConPrecio
+        .map((d) => (d.detalle.pesoNeto * d.precioPorKilo * 100).round())
         .fold(0, (suma, cent) => suma + cent);
     // 2) Convertimos totalCentavos a double para mostrar:
     final total = totalCentavos / 100.0;
@@ -296,7 +309,8 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
       },
 
       child: Scaffold(
-        appBar: AppBar(title: Text('Venta')),
+        appBar: AppBar(title: Text('Venta',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold))),
         body: SingleChildScrollView(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -332,10 +346,18 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                               itemBuilder: (_, i) {
                                 final c = _searchcliente.text.isEmpty ? clientes[i] : filtroclientes[i];
                                 return ListTile(
-                                  title: Text(c.nombreCliente),
-                                  subtitle: Text(c.calleNumero ?? ''),
+                                  leading: Icon(Icons.person_outline, size: 28, color: Colors.blueGrey),
+                                  title: Text(
+                                    c.nombreCliente,
+                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+                                  ),
+                                  subtitle: Text(
+                                    c.calleNumero ?? '',
+                                    style: TextStyle(fontSize: 16),
+                                  ),
                                   onTap: () => _onClientTap(c),
                                 );
+
                               },
                             ),
                           ),
@@ -371,9 +393,68 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                             ],
                           ),
                           Divider(),
-                          Text('Nombre: ${seleccionarcliente!.nombreCliente}'),
-                          Text('Dirección: ${seleccionarcliente!.calleNumero ?? ''}'),
-                          Text('Clave: ${seleccionarcliente!.clave}'),
+                          Row(
+                            children: [
+                              Icon(Icons.person, size: 20, color: Colors.black54),
+                              SizedBox(width: 6),
+                              Expanded(
+                                child: RichText(
+                                  text: TextSpan(
+                                    text: 'Nombre: ',
+                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
+                                    children: [
+                                      TextSpan(
+                                        text: seleccionarcliente!.nombreCliente,
+                                        style: TextStyle(fontWeight: FontWeight.normal),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Icon(Icons.home, size: 20, color: Colors.black54),
+                              SizedBox(width: 6),
+                              Expanded(
+                                child: RichText(
+                                  text: TextSpan(
+                                    text: 'Dirección: ',
+                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
+                                    children: [
+                                      TextSpan(
+                                        text: seleccionarcliente!.calleNumero ?? '',
+                                        style: TextStyle(fontWeight: FontWeight.normal),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Icon(Icons.vpn_key, size: 20, color: Colors.black54),
+                              SizedBox(width: 6),
+                              RichText(
+                                text: TextSpan(
+                                  text: 'RFC: ',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
+                                  children: [
+                                    TextSpan(
+                                      text: seleccionarcliente!.rfc,
+                                      style: TextStyle(fontWeight: FontWeight.normal),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+
+
                           Row(
                             mainAxisAlignment: MainAxisAlignment.end,
                             children: [
@@ -464,7 +545,7 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text('Caja encontrada',
-                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                                 IconButton(
                                   icon: Icon(Icons.close, color: Colors.grey[700]),
                                   onPressed: () {
@@ -480,67 +561,117 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                             ),
                             Divider(),
                             // ── Fila de encabezados de columnas ──
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              child: Row(
-                                children: [
-                                  Expanded(child: Text('Peso neto',    textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold))),
-                                  Expanded(child: Text('Descripción',  textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold))),
-                                  Expanded(child: Text('Subtotal',     textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold))),
-                                ],
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 8.0),
+                              child: Center(
+                                child: Text(
+                                  'Producto | peso | costo | subTotal',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                  ),
+                                ),
                               ),
                             ),
+
                             Divider(),
 
                             // ── Lista de detalles ──
-                            if (_detallesEscaneados.isEmpty)
+                            if (_detallesConPrecio.isEmpty)
                               Center(child: Text('No hay cajas escaneadas aún'))
                             else
                             // DESPUÉS: filas “dismissible” que puedes deslizar para borrar
-                              ..._detallesEscaneados.asMap().entries.map((entry) {
-                                final i = entry.key;
-                                final d = entry.value;
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 4),
-                                  child: Row(
-                                    children: [
-                                      // Sólo en modo edición muestro el checkbox
-                                      if (_modoEdicion)
-                                        Checkbox(
-                                          value: _seleccionados.contains(i),
-                                          onChanged: (v) {
-                                            setState(() {
-                                              if (v == true) _seleccionados.add(i);
-                                              else _seleccionados.remove(i);
-                                            });
-                                          },
-                                        ),
+                              ..._detallesConPrecio.asMap().entries.map((entry) {
+                                final index = entry.key;
+                                final item = entry.value;
+                                final d = item.detalle;
+                                final precio = item.precioPorKilo;
+                                final peso = d.pesoNeto;
+                                final subtotal = peso * precio;
 
-                                      // Tres columnas repartidas
-                                      Expanded(
-                                        child: Text(
-                                          '${d.pesoNeto} kg',
-                                          textAlign: TextAlign.center,
+                                final seleccionado = _seleccionados.contains(index);
+
+                                return GestureDetector(
+                                  onTap: _modoEdicion
+                                      ? () {
+                                    setState(() {
+                                      if (seleccionado) {
+                                        _seleccionados.remove(index);
+                                      } else {
+                                        _seleccionados.add(index);
+                                      }
+                                    });
+                                  }
+                                      : null,
+                                  child: Container(
+                                    color: seleccionado ? Colors.red[100] : null,
+                                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        if (_modoEdicion)
+                                          Checkbox(
+                                            value: seleccionado,
+                                            onChanged: (_) {
+                                              setState(() {
+                                                if (seleccionado) {
+                                                  _seleccionados.remove(index);
+                                                } else {
+                                                  _seleccionados.add(index);
+                                                }
+                                              });
+                                            },
+                                          ),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                d.descripcion,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Row(
+                                                children: [
+                                                  Expanded(
+                                                    flex: 3,
+                                                    child: Text(
+                                                      '${peso.toStringAsFixed(2)} kg',
+                                                      textAlign: TextAlign.right,
+                                                      style: const TextStyle(fontSize: 16),
+                                                    ),
+                                                  ),
+                                                  Expanded(
+                                                    flex: 3,
+                                                    child: Text(
+                                                      '\$${precio.toStringAsFixed(2)}',
+                                                      textAlign: TextAlign.right,
+                                                      style: const TextStyle(fontSize: 16),
+                                                    ),
+                                                  ),
+                                                  Expanded(
+                                                    flex: 3,
+                                                    child: Text(
+                                                      '\$${subtotal.toStringAsFixed(2)}',
+                                                      textAlign: TextAlign.right,
+                                                      style: const TextStyle(fontSize: 16),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+
+                                            ],
+                                          ),
                                         ),
-                                      ),
-                                      Expanded(
-                                        child: Text(
-                                          d.descripcion,
-                                          textAlign: TextAlign.center,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      Expanded(
-                                        child: Text(
-                                          '\$${(d.importe).toStringAsFixed(2)}',
-                                          textAlign: TextAlign.center,
-                                        ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
+
                                   ),
                                 );
                               }).toList(),
+
                             SizedBox(height: 12,),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -571,10 +702,100 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                               children: [
                                 Text(
                                   'Total: \$${ (totalCentavos / 100.0).toStringAsFixed(2) }',
-                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                                 ),
                               ],
                             ),
+                            Divider(),
+                            if (_modoEdicion && _seleccionados.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8.0),
+                                child: ElevatedButton.icon(
+                                  icon: Icon(Icons.delete_sweep),
+                                  label: Text('Eliminar ${_seleccionados.length}'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                  ),
+                                  onPressed: () async {
+                                    final confirmar = await showDialog<bool>(
+                                      context: context,
+                                        builder: (_) => AlertDialog(
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                          title: Row(
+                                            children: const [
+                                              Icon(Icons.delete_forever, color: Colors.red, size: 28),
+                                              SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  'Confirmar eliminación',
+                                                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          content: Text(
+                                            '¿Estás seguro de eliminar ${_seleccionados.length} caja(s)?',
+                                            style: const TextStyle(fontSize: 18),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                          actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                          actions: [
+                                            Row(
+                                              children: [
+                                                // Botón Cancelar
+                                                Expanded(
+                                                  child: ElevatedButton.icon(
+                                                    icon: const Icon(Icons.cancel, color: Colors.white, size: 20),
+                                                    label: const Text(
+                                                      'Cancelar',
+                                                      style: TextStyle(fontSize: 16, color: Colors.white),
+                                                    ),
+                                                    style: ElevatedButton.styleFrom(
+                                                      backgroundColor: Colors.grey[700],
+                                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                                    ),
+                                                    onPressed: () => Navigator.of(context).pop(false),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 12),
+
+                                                // Botón Eliminar
+                                                Expanded(
+                                                  child: ElevatedButton.icon(
+                                                    icon: const Icon(Icons.delete, color: Colors.white, size: 20),
+                                                    label: const Text(
+                                                      'Eliminar',
+                                                      style: TextStyle(fontSize: 16, color: Colors.white),
+                                                    ),
+                                                    style: ElevatedButton.styleFrom(
+                                                      backgroundColor: Colors.red[700],
+                                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                                    ),
+                                                    onPressed: () => Navigator.of(context).pop(true),
+                                                  ),
+                                                ),
+                                              ],
+                                            )
+                                          ],
+                                        )
+                                    );
+                                    //si el usuario confirma, se borra
+                                    if (confirmar == true){
+                                      setState(() {
+                                        final indices = _seleccionados.toList()..sort((a, b) => b - a);
+                                        for (var idx in indices) {
+                                          _detallesEscaneados.removeAt(idx);
+                                          _detallesConPrecio.removeAt(idx);
+                                        }
+                                        _seleccionados.clear();
+                                        _modoEdicion = false;
+                                      });
+                                    }
+                                  },
+                                ),
+                              ),
 
                             // ─── Aquí va el dropdown de forma de pago, tras haber escaneado al menos una caja ───
                             if (_detallesEscaneados.isNotEmpty) ...[
@@ -619,62 +840,20 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                                 else
                                   Text(
                                     'Cambio: \$${cambioDisplay.toStringAsFixed(2)}',
-                                    style: TextStyle(
-                                        fontWeight:
-                                        FontWeight.bold),
+                                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green[800]),
                                   ),
                               ],
                             ],
-
-                            if (_modoEdicion && _seleccionados.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8.0),
-                                child: ElevatedButton.icon(
-                                  icon: Icon(Icons.delete_sweep),
-                                  label: Text('Eliminar ${_seleccionados.length}'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                  ),
-                                  onPressed: () async {
-                                    final confirmar = await showDialog<bool>(
-                                        context: context,
-                                        builder: (_) => AlertDialog(
-                                          title: Text('Confrimar eliminación'),
-                                          content: Text('¿Estás seguro de eliminar '
-                                          '${_seleccionados.length} caja(s)?'),
-                                          actions: [
-                                            TextButton(
-                                                onPressed: ()=> Navigator.of(context).pop(false),
-                                                child: Text('Cancelar')),
-                                            TextButton(
-                                                onPressed: () => Navigator.of(context).pop(true),
-                                                child: Text('Eliminar'),
-                                            )
-                                          ],
-                                        ),
-                                    );
-                                    //si el usuario confirma, se borra
-                                    if (confirmar == true){
-                                      setState(() {
-                                        final indices = _seleccionados.toList()
-                                          ..sort((a, b) => b - a);
-                                        for (var idx in indices) {
-                                          _detallesEscaneados.removeAt(idx);
-                                        }
-                                        _seleccionados.clear();
-                                        _modoEdicion = false;
-                                      });
-                                    }
-                                  },
-                                ),
-                              ),
                             SizedBox(height: 8),
+
+
                           ],
                         ),
                       ),
                     ),
                   ],
-                  if (_selectedPaymentMethod != null &&
+                  if (_detallesEscaneados.isNotEmpty &&
+                      _selectedPaymentMethod != null &&
                       (
                           (_selectedPaymentMethod == 'Efectivo' && pagoEnEfectivo >= totalVenta)
                               || (_selectedPaymentMethod != 'Efectivo')
@@ -689,124 +868,206 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                           minimumSize: Size(double.infinity, 48),
                         ),
                         onPressed: () {
-                          showDialog(
-                              context: context,
-                              barrierDismissible: false,
-                              builder: (BuildContext dialogContext){
-                                return AlertDialog(
-                                  title: Text('Confirmar'),
-                                  content: Text('¿Finalizar venta?'),
-                                  actions: [
-                                    TextButton(
-                                        onPressed: (){
-                                          Navigator.of(dialogContext).pop();
-                                        },
-                                        child: Text('Cancelar'),
-                                    ),
-                                    TextButton(
-                                        onPressed: () async {
-                                          Navigator.of(dialogContext).pop();
-
-                                          // 1) Genera el folio ANTES de crear el objeto Venta
-                                          final nuevoFolio = 'F${DateTime.now().millisecondsSinceEpoch}';
-
-                                          // 2) Crear el objeto Venta con los datos de pantalla:
-                                          final ventaObj = Venta(
-                                            fecha:        DateTime.now(),
-                                            idcliente:    seleccionarcliente!.idcliente,
-                                            folio:        nuevoFolio,
-                                            idchofer:     UsuarioActivo.idChofer!,
-                                            total:        totalVenta,
-                                            idpago:       (_selectedPaymentMethod == 'Efectivo')
-                                                ? 1
-                                                : (_selectedPaymentMethod == 'Cheque')
-                                                ? 2
-                                                : 3,
-                                            pagoRecibido: (_selectedPaymentMethod == 'Efectivo')
-                                                ? pagoEnEfectivo
-                                                : null,
-                                            clienteNombre: seleccionarcliente!.nombreCliente,
-                                            metodoPago:    _selectedPaymentMethod!,
-                                            cambio:        (_selectedPaymentMethod == 'Efectivo')
-                                                ? (pagoEnEfectivo - totalVenta)
-                                                : null,
-                                          );
-
-                                          // 3) Insertar en BD y obtener el id autogenerado:
-                                          final nuevoId = await VentaService.insertarVenta(ventaObj);
-
-                                          // 4) “Reconstruir” Venta con el idVenta asignado (opcional, pero útil para detalle):
-                                          final ventaConID = Venta(
-                                            idVenta:     nuevoId,
-                                            fecha:        ventaObj.fecha,
-                                            idcliente:    ventaObj.idcliente,
-                                            folio:        nuevoFolio,
-                                            idchofer:     ventaObj.idchofer,
-                                            total:        ventaObj.total,
-                                            idpago:       ventaObj.idpago,
-                                            pagoRecibido: ventaObj.pagoRecibido,
-                                            clienteNombre: ventaObj.clienteNombre,
-                                            metodoPago:    ventaObj.metodoPago,
-                                            cambio:        ventaObj.cambio,
-                                          );
-
-                                          // 5) Insertar cada detalle de venta con el mismo idVenta y status='Vendido'
-                                          for (final d in _detallesEscaneados) {
-                                            final detalle = VentaDetalle(
-                                              qr:         d.qr,
-                                              pesoNeto:   d.pesoNeto,
-                                              subtotal:   d.importe,
-                                              status:     'Vendido',          // <- Aquí seteamos el status a “Vendido”
-                                              idproducto: d.idproducto,
-                                              folio:      nuevoFolio,
-                                              descripcion: d.descripcion,
-                                              idVenta:    nuevoId,
-                                            );
-                                            await VentaDetalleService.insertarDetalle(detalle);
-                                          }
-
-                                          // 6) Aquí llamas para imprimir justo lo que acabas de guardar
-                                          final ultimaVenta = await VentaService.obtenerUltimaVenta();
-
-                                          //7) Despues de insertar todo, nacegar a detalleVenta
-                                          Navigator.push<bool>(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) => DetalleVentaPage(
-                                                venta: ventaConID,
-                                                showSolicitudDevolucion: false, // o true, según dónde la llames
-                                              ),
+                          if(_detallesEscaneados.isEmpty) {
+                            showDialog(
+                                context: context,
+                                builder: (_) =>
+                                    AlertDialog(
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      title: Row(
+                                        children: const [
+                                          Icon(Icons.error_outline, color: Colors.redAccent, size: 28),
+                                          SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              'Error',
+                                              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                                             ),
-                                          ).then((devolverTrue) {
-                                            if (devolverTrue == true) {
-                                              // NOTIFICAR al provider que hay una venta nueva:
-                                              //limpiar todo
-                                              setState(() {
-                                                _detallesEscaneados.clear();
-                                                seleccionarcliente = null;
-                                                _selectedPaymentMethod = null;
-                                                _paymentAmountController.clear();
-                                                _cajaSeleccionada = null;
-                                                _mensajeEscaneo = '';
-                                                _showScanner = false;
-                                                _puedeEscanear = true;
-                                                _modoEscaneoActivo = false;
-                                                _modoEdicion = false;
-                                                _seleccionados.clear();
-                                                // Si tienes otros campos que quieras reiniciar, agrégalos aquí:
-                                                _scanController.clear();
-                                                _searchcliente.clear();
-                                              });
-                                            }
-                                          });
-                                        },
-                                        child: Text('Continuar')
+                                          ),
+                                        ],
+                                      ),
+                                      content: const Text(
+                                        'Debes escanear al menos una caja antes de finalizar la venta.',
+                                        style: TextStyle(fontSize: 18),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                      actionsAlignment: MainAxisAlignment.center,
+                                      actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                      actions: [
+                                        ElevatedButton.icon(
+                                          icon: const Icon(Icons.check, size: 20, color: Colors.white),
+                                          label: const Text(
+                                            'OK',
+                                            style: TextStyle(fontSize: 16, color: Colors.white),
+                                          ),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.redAccent,
+                                            minimumSize: const Size(140, 48),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                          ),
+                                          onPressed: () => Navigator.of(context).pop(),
+                                        ),
+                                      ],
                                     )
-                                  ],
-                                );
-                              }
-                          );
-                        },
+                            );
+                            return;
+                          }
+                            showDialog(
+                                context: context,
+                                barrierDismissible: false,
+                                builder: (BuildContext dialogContext){
+                                  return AlertDialog(
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                    title: Row(
+                                      children: const [
+                                        Icon(Icons.check_circle_outline, color: Colors.green, size: 28),
+                                        SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            'Confirmar',
+                                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    content: const Text(
+                                      '¿Finalizar venta?',
+                                      style: TextStyle(fontSize: 18),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                    actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                    actions: [
+                                      Row(
+                                        children: [
+                                          // Botón Cancelar
+                                          Expanded(
+                                            child: ElevatedButton.icon(
+                                              icon: const Icon(Icons.cancel, size: 20, color: Colors.white),
+                                              label: const Text(
+                                                'Cancelar',
+                                                style: TextStyle(fontSize: 16, color: Colors.white),
+                                              ),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.grey[700],
+                                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                              ),
+                                              onPressed: () => Navigator.of(dialogContext).pop(),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+
+                                          // Botón Continuar
+                                          Expanded(
+                                            child: ElevatedButton.icon(
+                                              icon: const Icon(Icons.check, size: 20, color: Colors.white),
+                                              label: const Text(
+                                                'Continuar',
+                                                style: TextStyle(fontSize: 16, color: Colors.white),
+                                              ),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.green[700],
+                                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                              ),
+                                              onPressed: () async {
+                                                Navigator.of(dialogContext).pop();
+
+                                                final nuevoFolio = 'F${DateTime.now().millisecondsSinceEpoch}';
+
+                                                final ventaObj = Venta(
+                                                  fecha: DateTime.now(),
+                                                  idcliente: seleccionarcliente!.idcliente,
+                                                  folio: nuevoFolio,
+                                                  idchofer: UsuarioActivo.idChofer!,
+                                                  total: totalVenta,
+                                                  idpago: (_selectedPaymentMethod == 'Efectivo')
+                                                      ? 1
+                                                      : (_selectedPaymentMethod == 'Cheque')
+                                                      ? 2
+                                                      : 3,
+                                                  pagoRecibido: (_selectedPaymentMethod == 'Efectivo') ? pagoEnEfectivo : null,
+                                                  clienteNombre: seleccionarcliente!.nombreCliente,
+                                                  metodoPago: _selectedPaymentMethod!,
+                                                  cambio: (_selectedPaymentMethod == 'Efectivo')
+                                                      ? (pagoEnEfectivo - totalVenta)
+                                                      : null,
+                                                  direccionCliente: seleccionarcliente!.calleNumero ?? '',
+                                                  rfcCliente: seleccionarcliente!.rfc ?? '',
+                                                );
+
+                                                final nuevoId = await VentaService.insertarVenta(ventaObj);
+
+                                                final ventaConID = Venta(
+                                                  idVenta: nuevoId,
+                                                  fecha: ventaObj.fecha,
+                                                  idcliente: ventaObj.idcliente,
+                                                  folio: nuevoFolio,
+                                                  idchofer: ventaObj.idchofer,
+                                                  total: ventaObj.total,
+                                                  idpago: ventaObj.idpago,
+                                                  pagoRecibido: ventaObj.pagoRecibido,
+                                                  clienteNombre: ventaObj.clienteNombre,
+                                                  metodoPago: ventaObj.metodoPago,
+                                                  cambio: ventaObj.cambio,
+                                                  direccionCliente: ventaObj.direccionCliente,
+                                                  rfcCliente: ventaObj.rfcCliente,
+                                                );
+
+                                                for (final d in _detallesEscaneados) {
+                                                  final detalle = VentaDetalle(
+                                                    qr: d.qr,
+                                                    pesoNeto: d.pesoNeto,
+                                                    subtotal: d.importe,
+                                                    status: 'Vendido',
+                                                    idproducto: d.idproducto,
+                                                    folio: nuevoFolio,
+                                                    descripcion: d.descripcion,
+                                                    idVenta: nuevoId,
+                                                  );
+                                                  await VentaDetalleService.insertarDetalle(detalle);
+                                                }
+
+                                                final ultimaVenta = await VentaService.obtenerUltimaVenta();
+
+                                                Navigator.push<bool>(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder: (_) => DetalleVentaPage(
+                                                      venta: ventaConID,
+                                                      showSolicitudDevolucion: false,
+                                                    ),
+                                                  ),
+                                                ).then((devolverTrue) {
+                                                  if (devolverTrue == true) {
+                                                    setState(() {
+                                                      _detallesEscaneados.clear();
+                                                      seleccionarcliente = null;
+                                                      _selectedPaymentMethod = null;
+                                                      _paymentAmountController.clear();
+                                                      _cajaSeleccionada = null;
+                                                      _mensajeEscaneo = '';
+                                                      _showScanner = false;
+                                                      _puedeEscanear = true;
+                                                      _modoEscaneoActivo = false;
+                                                      _modoEdicion = false;
+                                                      _seleccionados.clear();
+                                                      _scanController.clear();
+                                                      _searchcliente.clear();
+                                                    });
+                                                  }
+                                                });
+                                              },
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  );
+                                }
+                            );
+                          }
+
                       ),
                     ),
                 ],
@@ -853,10 +1114,10 @@ class _ClienteMapPageState extends State<ClienteMapPage> with SingleTickerProvid
         final loc = results.first;
         setState(() => _destino = LatLng(loc.latitude, loc.longitude));
       } else {
-        print('❌ No encontré coordenadas para: $full');
+        print('No encontré coordenadas para: $full');
       }
     } catch (e) {
-      print('❌ Error en geocoding: $e');
+      print('Error en geocoding: $e');
     }
   }
 

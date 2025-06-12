@@ -1,6 +1,5 @@
 import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:flutter/services.dart';
-import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 
 import 'package:conexion/BD/global.dart';
@@ -31,38 +30,38 @@ class _ventasState extends State<ventas> with AutomaticKeepAliveClientMixin<vent
   TextEditingController _searchController = TextEditingController();
 
   bool cargando = true;
-
   bool get wantKeepAlive => true;
+
+  DateTime? fechaSeleccionada;
 
   //Cargar datos de Ventas
   Future<void> cargarVentas() async {
-   // if (listaDeDatos.isNotEmpty) return; <-- Evitar que no recargue pagina
     setState(() => cargando = true);
-
     final correo = UsuarioActivo.correo;
-    if (correo == null) {
-      // manejar sin sesión
-      return;
-    }
+    if (correo == null) return;
 
-    // 1) Traigo las filas ordenadas en SQL (ORDER BY fecha DESC)
     final raws = await VentaService.obtenerVentasPorCorreo(correo);
+    final ventas = raws.map((m) => Venta.fromMap(Map<String, dynamic>.from(m))).toList();
 
-    // 2) Las convierto en objetos Venta
-    final ventas = raws
-        .map((m) => Venta.fromMap(Map<String, dynamic>.from(m)))
-        .toList();
-
-    // 3) (Opcional) Me aseguro en Dart que sigan ordenadas descendentemente
     ventas.sort((a, b) => b.fecha.compareTo(a.fecha));
+
+    // Filtro por fecha si se seleccionó
+    List<Venta> filtradas = ventas;
+    if (fechaSeleccionada != null) {
+      final fechaBase = DateFormat('yyyy-MM-dd').format(fechaSeleccionada!);
+      filtradas = ventas.where((v) =>
+      DateFormat('yyyy-MM-dd').format(v.fecha) == fechaBase
+      ).toList();
+    }
 
     if (!mounted) return;
     setState(() {
-      listaDeDatos  = ventas;
-      listaFiltrada = ventas;
-      cargando      = false;
+      listaDeDatos = ventas;
+      listaFiltrada = filtradas;
+      cargando = false;
     });
   }
+
 
 
   void buscarPorNombre(String query) {
@@ -121,47 +120,45 @@ class _ventasState extends State<ventas> with AutomaticKeepAliveClientMixin<vent
       child: Scaffold(
         appBar: AppBar(
           automaticallyImplyLeading: false,
-          title: Text('Ventas'),
+          title: Text('Ventas',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
           actions: [
-            IconButton(
-                onPressed: (){
-                  showSearch(
+            Row(
+              children: [
+                TextButton.icon(
+                  icon: Icon(Icons.calendar_today, size: 28,),
+                  label: Text(fechaSeleccionada != null
+                      ? DateFormat('dd/MM/yyyy').format(fechaSeleccionada!)
+                      : 'Todas las fechas',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: () async {
+                    DateTime? picked = await showDatePicker(
                       context: context,
-                      delegate: VentasSearchDelegate(
-                        onSearch: buscarPorNombre,
-                        dataList: listaDeDatos
-                      ),
-                  );
-            }
-                , icon: Icon(Icons.search)
+                      initialDate: DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now(),
+                    );
+
+                    setState(() {
+                      fechaSeleccionada = picked;
+                    });
+                    await cargarVentas();
+                  },
+                ),
+                if (fechaSeleccionada != null)
+                  IconButton(
+                    icon: Icon(Icons.clear),
+                    onPressed: () async {
+                      setState(() {
+                        fechaSeleccionada = null;
+                      });
+                      await cargarVentas();
+                    },
+                  ),
+              ],
             ),
-            IconButton(
-                onPressed: (){
-                  showModalBottomSheet(
-                      context: context,
-                      builder: (_) => Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ListTile(
-                            title: Text('Ordenar por precio'),
-                            onTap: (){
-                              ordenarPor('precio');
-                              Navigator.pop(context);
-                            },
-                          ),
-                          ListTile(
-                            title: Text('Ordenar por fecha'),
-                            onTap: (){
-                              ordenarPor('fecha');
-                              Navigator.pop(context);
-                            },
-                          )
-                        ],
-                      )
-                  );
-                },
-                icon: Icon(Icons.sort)
-            )
+
           ],
         ),
         body: Column(
@@ -170,7 +167,9 @@ class _ventasState extends State<ventas> with AutomaticKeepAliveClientMixin<vent
                 child: cargando
                     ? Center(child: CircularProgressIndicator())
                     :listaFiltrada.isEmpty
-                    ? Center(child: Text("No hay ventas registradas"))
+                    ? Center(child: Text(fechaSeleccionada != null
+                    ? "No hay ventas en esa fecha"
+                    : "No hay ventas registradas"))
                     : RefreshIndicator(
                     child: ListView.builder(
                         physics: const AlwaysScrollableScrollPhysics(),
@@ -201,16 +200,17 @@ class _ventasState extends State<ventas> with AutomaticKeepAliveClientMixin<vent
                                     }
                                   },
                                   child: ListTile(
-                                    leading: Icon(Icons.shopping_cart),
-                                    title: Text('Cliente: ${venta.clienteNombre}'),
+                                    leading: Icon(Icons.receipt_long, size: 32, color: Colors.green[800]),
+                                    title: Text('Cliente: ${venta.clienteNombre}', style: TextStyle(fontSize: 18)),
                                     subtitle: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text('Total \$${venta.total}'),
-                                        Text('Fecha: $fechaSolo'),
+                                        Row(children: [Icon(Icons.attach_money, size: 20), Text('Total: \$${venta.total}', style: TextStyle(fontSize: 16))]),
+                                        Row(children: [Icon(Icons.date_range, size: 20), Text('Fecha: $fechaSolo', style: TextStyle(fontSize: 16))]),
                                       ],
                                     ),
-                                  ),
+                                  )
+
                                 ),
                               )
                           );
@@ -229,7 +229,7 @@ class _ventasState extends State<ventas> with AutomaticKeepAliveClientMixin<vent
               Navigator.push(context,
               MaterialPageRoute(builder: (_)=> venta()));
             },
-          child: Icon(Icons.add),
+          child: Icon(Icons.add,size: 28),
         ),
       ),
     );
@@ -274,23 +274,67 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
       final reintentar = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          title: const Text('Bluetooth apagado'),
-          content: const Text(
-            'Para imprimir, habilita el Bluetooth. '
-                'Presiona “Reintentar” una vez que esté encendido.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancelar'),
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: const [
+                Icon(Icons.bluetooth_disabled, color: Colors.blueGrey, size: 36),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Bluetooth apagado',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
             ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Reintentar'),
+            content: const Text(
+              'Para imprimir, primero habilita el Bluetooth en tu dispositivo.\n\n'
+                  'Después, presiona "Recargar".',
+              style: TextStyle(fontSize: 18),
+              textAlign: TextAlign.center,
             ),
-          ],
-        ),
+            actionsAlignment: MainAxisAlignment.spaceBetween,
+            actionsPadding: EdgeInsets.all(12),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Botón Cancelar
+                    Flexible(
+                      child: ElevatedButton.icon(
+                        icon: Icon(Icons.cancel, size: 20, color: Colors.white),
+                        label: Text('Cancelar', style: TextStyle(fontSize: 16, color: Colors.white)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.grey,
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () => Navigator.of(context).pop(false),
+                      ),
+                    ),
+                    SizedBox(width: 12), // Espacio entre botones
+
+                    // Botón Reintentar
+                    Flexible(
+                      child: ElevatedButton.icon(
+                        icon: Icon(Icons.refresh, size: 20, color: Colors.white),
+                        label: Text('Recargar', style: TextStyle(fontSize: 16, color: Colors.white)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () => Navigator.of(context).pop(true),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          )
       );
 
       if (reintentar == true) {
@@ -314,6 +358,9 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
     bool? alreadyConnected = await _printer.isConnected;
     if (alreadyConnected != true) {
       _devices = await _printer.getBondedDevices();
+      for (var d in _devices) {
+        print('📡 Emparejado: ${d.name} / ${d.address}');
+      }
     }
 
     // 2) Obtenemos el chofer actual según el correo guardado en UsuarioActivo
@@ -322,14 +369,20 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
       Chofer? chofer = await ChoferService.obtenerUsuarioLocal(correo);
       if (chofer != null) {
         String nombreImpresoraEsperada = chofer.impresora;
+        print('🖨️ Impresora esperada: $nombreImpresoraEsperada');
         // Buscamos entre _devices aquel cuyo name o address coincida
         for (BluetoothDevice device in _devices) {
-          if (device.name == nombreImpresoraEsperada ||
-              device.address == nombreImpresoraEsperada) {
+          final deviceName = device.name?.toLowerCase().trim() ?? '';
+          final deviceAddr = device.address?.toLowerCase().trim() ?? '';
+          final esperado   = nombreImpresoraEsperada.toLowerCase().trim();
+
+          if (deviceName == esperado || deviceAddr == esperado) {
+            print('✅ Impresora encontrada: ${device.name} / ${device.address}');
             _selectedDevice = device;
             break;
           }
         }
+
       }
     }
 
@@ -353,220 +406,447 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
 
   double _toDoubleSafe(dynamic n) => (n as num?)?.toDouble() ?? 0.0;
 
+
+  String quitarAcentos(String texto) {
+    const acentos = 'áéíóúÁÉÍÓÚñÑüÜ';
+    const reemplazos = 'aeiouAEIOUnNuU';
+
+    return texto.split('').map((c) {
+      final index = acentos.indexOf(c);
+      return index != -1 ? reemplazos[index] : c;
+    }).join();
+  }
+
+  //Contenido para la impresión
+  Future<void> _printTicketContent(Venta venta, List<VentaDetalle> detalles) async {
+    final dfDate = DateFormat('yyyy-MM-dd');
+    final dfTime = DateFormat('HH:mm');
+    String fechaStr = dfDate.format(venta.fecha);
+    String horaStr = dfTime.format(venta.fecha);
+
+    // Cabecera
+    _printer.printNewLine();
+    _printer.printCustom("Agropecuaria El Avión", 2, 1);
+    _printer.printNewLine();
+    _printer.printCustom("Perif. Guada-Maza km 7.1", 1, 1);
+    _printer.printCustom("Penita, Tepic, Nayarit 63167", 1, 1);
+    _printer.printNewLine();
+
+    // Fecha y hora
+    _printer.printLeftRight("F: $fechaStr", "H: $horaStr", 1);
+    _printer.printNewLine();
+
+    // Folio y vendedor
+    _printer.printCustom("Folio: ${venta.folio}", 1, 0);
+    _printer.printCustom("Vendedor: ${UsuarioActivo.nombre ?? ''}", 1, 0);
+    _printer.printNewLine();
+
+    // Cliente
+    _printer.printCustom("Cliente: ${quitarAcentos(venta.clienteNombre ?? 'N/A')}", 1, 0);
+    _printer.printCustom("Direccion: ${quitarAcentos(venta.direccionCliente ?? 'N/A')}", 1, 0);
+    // NUEVO: RFC
+    _printer.printCustom("RFC: ${venta.rfcCliente ?? 'N/A'}", 1, 0);
+
+    _printer.printNewLine();
+    _printer.printCustom("--------------------------------", 1, 1);
+
+    // Encabezados columnas
+    const int anchoTotal = 32;
+
+    String col1 = "Producto";
+    String col2 = "Peso";
+    String col3 = "Costo";
+    String col4 = "subTotal";
+
+// Asignamos longitud fija a cada columna para que cuadre con 32
+    int ancho1 = 10; // Producto
+    int ancho2 = 5;  // Peso
+    int ancho3 = 7;  // Costo
+    int ancho4 = 10; // subTotal
+
+    String headerLine =
+        col1.padRight(ancho1) +
+            col2.padRight(ancho2) +
+            col3.padRight(ancho3) +
+            col4.padRight(ancho4);
+
+    _printer.printCustom(headerLine, 1, 1);
+    _printer.printCustom("--------------------------------", 1, 1);
+
+    // Filas de detalle
+    for (final d in detalles) {
+      final peso = (d.pesoNeto as num).toStringAsFixed(2);
+      final precio = "\$${(d.precio as num).toStringAsFixed(2)}";
+      final subtotal = "\$${(d.subtotal as num).toStringAsFixed(2)}";
+      String desc = d.descripcion ?? 'Producto';
+
+      // 👉 Limita descripción a una sola línea legible
+      if (desc.length > 30) {
+        desc = desc.substring(0, 27) + '...';
+      }
+
+      // 🖨 Línea 1: descripción
+      _printer.printCustom(desc, 1, 0); // alineado a la izquierda
+
+      // 🖨 Línea 2: peso - precio - subtotal, con espacio entre cada uno
+      final espacio1 = 10 - peso.length;
+      final espacio2 = 10 - precio.length;
+
+      final lineaValores =
+          peso + ' ' * espacio1 +
+              precio + ' ' * espacio2 +
+              subtotal;
+
+      _printer.printCustom(lineaValores, 1, 0); // alineado a la izquierda
+      _printer.printNewLine();
+    }
+
+
+    _printer.printCustom("--------------------------------", 1, 1);
+
+    // Totales (IVA fijo 0.00)
+    double total = _toDoubleSafe(venta.total);
+    double recibido = _toDoubleSafe(venta.pagoRecibido);
+    _printer.printLeftRight("IVA:", "\$0.00", 1);
+    _printer.printLeftRight("Total:", "\$${total.toStringAsFixed(2)}", 1);
+    if (venta.idpago == 1) {
+      _printer.printLeftRight("Entregado:", "\$${recibido.toStringAsFixed(2)}", 1);
+      _printer.printLeftRight("Cambio:", "\$${(recibido - total).toStringAsFixed(2)}", 1);
+    }
+    _printer.printNewLine();
+    _printer.printNewLine();
+    _printer.printCustom("------------------------------", 1, 1);
+    _printer.printCustom("Firma de recibido", 1, 1);
+    _printer.printNewLine();
+    _printer.printNewLine();
+  }
+
   // Función que genera y envía el ticket a la impresora asignada.
   Future<void> _imprimirRecibo(Venta venta, List<VentaDetalle> detalles) async {
-    // 1) Verificar que exista impresora en base de datos y esté en la lista
+    // 1) Verificar que haya impresora asignada
     if (_selectedDevice == null) {
       await showDialog(
         context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Impresora no asignada'),
-          content: const Text(
-            'No se encontró ninguna impresora configurada para este chofer.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
+          builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: const [
+                Icon(Icons.print_disabled, color: Colors.red, size: 36),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Impresora no asignada',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+            content: const Text(
+              'No se encontró ninguna impresora configurada para este chofer.\n\n'
+                  'Por favor, verifica la configuración en el apartado de impresoras.',
+              style: TextStyle(fontSize: 16),
+              textAlign: TextAlign.justify,
+            ),
+            actionsAlignment: MainAxisAlignment.center,
+            actionsPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            actions: [
+              ElevatedButton.icon(
+                icon: Icon(Icons.check, size: 24, color: Colors.white),
+                label: Text(
+                  'Entendido',
+                  style: TextStyle(fontSize: 18, color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: Size(140, 48),
+                  backgroundColor: Colors.blue,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          )
+
       );
       return;
     }
 
     // 2) Intentar conectar a la impresora (si no está ya conectado)
     try {
-      await _connectPrinter();
+      bool? alreadyConnected = await _printer.isConnected;
+      if (alreadyConnected != true) {
+        await _printer.connect(_selectedDevice!);
+      }
+      _isPrinterConnected = true;
     } catch (_) {
       await showDialog(
         context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Error de conexión'),
-          content: const Text('No se pudo conectar a la impresora. Verifica que esté encendida y emparejada.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
+          builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: const [
+                Icon(Icons.wifi_off, color: Colors.orange, size: 36),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Error de conexión',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+            content: const Text(
+              'No se pudo conectar a la impresora.\n\n'
+                  'Asegúrate de que esté encendida, con batería suficiente y correctamente emparejada por Bluetooth.',
+              style: TextStyle(fontSize: 18),
+              textAlign: TextAlign.justify,
+            ),
+            actionsAlignment: MainAxisAlignment.center,
+            actionsPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            actions: [
+              ElevatedButton.icon(
+                icon: Icon(Icons.refresh, size: 24, color: Colors.white),
+                label: Text(
+                  'Reintentar',
+                  style: TextStyle(fontSize: 18, color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: Size(160, 48),
+                  backgroundColor: Colors.orange,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          )
+
       );
       return;
     }
 
-    // 3) Preguntamos al plugin si realmente quedó conectado
+    // 3) Confirmar que realmente quedó conectado
     bool? isConnected = await _printer.isConnected;
     if (isConnected != true) {
       await showDialog(
         context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Impresora desconectada'),
-          content: const Text('La impresora Bluetooth no está conectada.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
+          builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: const [
+                Icon(Icons.bluetooth_disabled, color: Colors.grey, size: 36),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Impresora desconectada',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+            content: const Text(
+              'La impresora Bluetooth no está conectada.\n\n'
+                  'Asegúrate de que esté encendida y vinculada correctamente.',
+              style: TextStyle(fontSize: 18),
+              textAlign: TextAlign.justify,
+            ),
+            actionsAlignment: MainAxisAlignment.center,
+            actionsPadding: EdgeInsets.all(12),
+            actions: [
+              ElevatedButton.icon(
+                icon: Icon(Icons.bluetooth_searching, color: Colors.white),
+                label: Text('Verificar', style: TextStyle(fontSize: 18, color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.grey,
+                  minimumSize: Size(160, 48),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          )
+
       );
       return;
     }
 
-    // 4) Si estamos conectados, enviamos el contenido del ticket
+    // 4) Imprimir la primera copia
     try {
-      final dfDate = DateFormat('yyyy-MM-dd');
-      final dfTime = DateFormat('HH:mm');
-      String fechaStr = dfDate.format(venta.fecha);
-      String horaStr = dfTime.format(venta.fecha);
-
-      // Cabecera
-      _printer.printNewLine();
-      _printer.printCustom("Agropecuaria El Avion", 2, 1);
-      _printer.printNewLine();
-      _printer.printCustom("Perif. Guadalajara-Mazatlan km 7.1", 1, 1);
-      _printer.printCustom("Penita, Tepic, Nayarit 63167", 1, 1);
-      _printer.printNewLine();
-
-      // Fecha y hora
-      _printer.printLeftRight("F: $fechaStr", "H: $horaStr", 1);
-      _printer.printNewLine();
-
-      // Folio y vendedor
-      _printer.printCustom("Folio: ${venta.folio}", 1, 0);
-      _printer.printCustom("Vendedor: ${UsuarioActivo.nombre ?? ''}", 1, 0);
-      _printer.printNewLine();
-
-      // Cliente
-      _printer.printCustom("Cliente: ${venta.clienteNombre ?? 'N/A'}", 1, 0);
-      _printer.printNewLine();
-      _printer.printCustom("--------------------------------", 1, 1);
-
-      // Encabezados columnas
-      // 1) Define los textos de las tres columnas:
-      String left   = "Peso";          // va a la izquierda
-      String middle = "Descripcion";   // va en el centro
-      String right  = "Importe";       // va a la derecha
-
-      const int anchoTotal = 32;
-
-      int lenLeft   = left.length;     // 4
-      int lenMid    = middle.length;   // 11
-      int lenRight  = right.length;    // 7
-
-
-      int espacioRestante = anchoTotal - (lenLeft + lenMid + lenRight);
-      int espaciosLM = espacioRestante ~/ 2;          // 10 ~/ 2 = 5
-      int espaciosMR = espacioRestante - espaciosLM;  // 10 - 5 = 5
-
-      String headerLine =
-          left +
-              " " * espaciosLM +
-              middle +
-              " " * espaciosMR +
-              right;
-
-      _printer.printCustom(headerLine, 1, 1);
-
-      _printer.printCustom("--------------------------------", 1, 1);
-
-      // Filas de detalle
-      for (final d in detalles) {
-        String pesoStr    = (d.pesoNeto as num).toStringAsFixed(2);              // ej. "12.34" (5 chars)
-        String importeStr = "\$${(d.subtotal as num).toStringAsFixed(2)}";       // ej. "$56.78" (6 chars)
-        String desc       = d.descripcion ?? '';
-
-        const int anchoTotal = 32;
-
-        int lenPeso    = pesoStr.length;    // ex: 5
-        int lenImporte = importeStr.length; // ex: 6
-        int disponibleParaDesc = anchoTotal - (lenPeso + lenImporte + 2);
-        if (disponibleParaDesc < 0) disponibleParaDesc = 0;
-
-        if (desc.length > disponibleParaDesc) {
-          if (disponibleParaDesc > 3) {
-            desc = desc.substring(0, disponibleParaDesc - 3) + "...";
-          } else {
-            desc = desc.substring(0, disponibleParaDesc);
-          }
-        }
-
-        String izquierda = pesoStr + " " + desc;
-        int lenIzquierda = izquierda.length; // peso + espacio + descripción recortada
-
-        int espaciosEntre = anchoTotal - (lenIzquierda + lenImporte);
-        if (espaciosEntre < 1) espaciosEntre = 1; // al menos un espacio
-
-        // Montamos la línea final:
-        String linea = izquierda + " " * espaciosEntre + importeStr;
-
-        // 3) Imprimimos con size=1 (fuente normal):
-        _printer.printCustom(linea, 1, 1);
-        _printer.printNewLine();
-      }
-
-      _printer.printCustom("--------------------------------", 1, 1);
-
-      // Totales
-      double total = _toDoubleSafe(venta.total);
-      double recibido = _toDoubleSafe(venta.pagoRecibido);
-      _printer.printLeftRight("Total:", "\$${total.toStringAsFixed(2)}", 1);
-      if (venta.idpago == 1) {
-        _printer.printLeftRight("Entregado:", "\$${recibido.toStringAsFixed(2)}", 1);
-        _printer.printLeftRight("Cambio:", "\$${(recibido - total).toStringAsFixed(2)}", 1);
-      }
-      _printer.printNewLine();
-
-      // Pie de ticket
-      _printer.printNewLine();
-      _printer.printNewLine();
-      _printer.printCustom("------------------------------", 1, 1);
-      _printer.printCustom("Firma de recibido", 1, 1);
-      _printer.printNewLine();
-      _printer.printNewLine();
-
-      // Cortar papel
-      _printer.paperCut();
-
-      // Mensaje de éxito y cerrar la página
+      await _printTicketContent(venta, detalles);
+    } catch (e) {
+      // Si falla la primera copia, mostramos error y salimos
       await showDialog(
         context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Listo'),
-          content: const Text('El ticket se imprimió correctamente.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
+          builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: const [
+                Icon(Icons.error_outline, color: Colors.redAccent, size: 36),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Error al imprimir',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      );
+            content: Text(
+              'Hubo un problema al imprimir la primera copia:\n\n$e',
+              style: const TextStyle(fontSize: 18),
+              textAlign: TextAlign.justify,
+            ),
+            actionsAlignment: MainAxisAlignment.center,
+            actionsPadding: const EdgeInsets.all(12),
+            actions: [
+              ElevatedButton.icon(
+                icon: const Icon(Icons.check_circle_outline, color: Colors.white),
+                label: const Text('Entendido', style: TextStyle(fontSize: 18, color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                  minimumSize: const Size(160, 48),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          )
 
-      // Finalmente, desconectamos para poder seleccionar otra vez en el futuro
+      );
       await _printer.disconnect();
       _isPrinterConnected = false;
+      return;
+    }
 
-      // Después de cerrar el diálogo, salimos de esta pantalla con pop(true)
-      Navigator.of(context).pop(true);
-    } catch (e) {
-      // Si falla la impresión
-      await showDialog(
-        context: context,
+    // 5) Mostrar diálogo para que el usuario corte manualmente el papel
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
         builder: (_) => AlertDialog(
-          title: const Text('Error al imprimir'),
-          content: Text('Hubo un problema al imprimir: $e'),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: const [
+              Icon(Icons.print, color: Colors.green, size: 36),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Primera copia impresa',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: const Text(
+            'Por favor, corta el papel de la primera copia.\n\n'
+                'Cuando estés listo, presiona el botón para imprimir la segunda copia.',
+            style: TextStyle(fontSize: 18),
+            textAlign: TextAlign.justify,
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actionsPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           actions: [
-            TextButton(
+            ElevatedButton.icon(
+              icon: Icon(Icons.print_outlined, color: Colors.white),
+              label: Text('Continuar', style: TextStyle(fontSize: 18, color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                minimumSize: Size(200, 48),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
             ),
           ],
-        ),
+        )
+
+    );
+
+    // 6) Imprimir la segunda copia
+    try {
+      await _printTicketContent(venta, detalles);
+    } catch (e) {
+      // Si falla la segunda copia, mostramos error
+      await showDialog(
+        context: context,
+          builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: const [
+                Icon(Icons.error, color: Colors.redAccent, size: 36),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Error al imprimir',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              'Hubo un problema al imprimir la segunda copia:\n\n$e',
+              style: const TextStyle(fontSize: 18),
+              textAlign: TextAlign.justify,
+            ),
+            actionsAlignment: MainAxisAlignment.center,
+            actionsPadding: const EdgeInsets.all(12),
+            actions: [
+              ElevatedButton.icon(
+                icon: const Icon(Icons.check, color: Colors.white),
+                label: const Text('Entendido', style: TextStyle(fontSize: 18, color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                  minimumSize: const Size(160, 48),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          )
       );
     }
+
+    // 7) Desconectar e informar éxito
+    await _printer.disconnect();
+    _isPrinterConnected = false;
+
+    await showDialog(
+      context: context,
+        builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: const [
+              Icon(Icons.check_circle_outline, color: Colors.green, size: 36),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Listo',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: const Text(
+            'Se imprimieron ambas copias correctamente.',
+            style: TextStyle(fontSize: 18),
+            textAlign: TextAlign.center,
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actionsPadding: EdgeInsets.all(12),
+          actions: [
+            ElevatedButton.icon(
+              icon: Icon(Icons.check, color: Colors.white),
+              label: Text('Aceptar', style: TextStyle(fontSize: 18, color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                minimumSize: Size(140, 48),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ],
+        )
+    );
+
+    Navigator.of(context).pop(true);
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -589,20 +869,69 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
               onPressed: () async {
                 final cerrar = await showDialog<bool>(
                   context: context,
-                  builder: (_) => AlertDialog(
-                    title: const Text('Salir de la venta'),
-                    content: const Text('¿Estás seguro de que quieres salir?'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(false),
-                        child: const Text('Cancelar'),
+                    builder: (_) => AlertDialog(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      title: Row(
+                        children: const [
+                          Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+                          SizedBox(width: 8),
+                          Text(
+                            'Salir de la ventana',
+                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                          ),
+                        ],
                       ),
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(true),
-                        child: const Text('Sí'),
+                      content: const Text(
+                        '¿Estás seguro de que quieres salir?',
+                        style: TextStyle(fontSize: 18),
                       ),
-                    ],
-                  ),
+                      actionsPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      actionsAlignment: MainAxisAlignment.spaceBetween,
+                      actions: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child:  Row(
+                            children: [
+                              // Botón Cancelar (izquierda)
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.cancel, size: 20, color: Colors.white),
+                                  label: const Text(
+                                    'Cancelar',
+                                    style: TextStyle(fontSize: 16, color: Colors.white),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.grey[700],
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                  onPressed: () => Navigator.of(context).pop(false),
+                                ),
+                              ),
+                              const SizedBox(width: 12), // Espacio entre botones
+
+                              // Botón Sí (derecha)
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.exit_to_app, size: 20, color: Colors.white),
+                                  label: const Text(
+                                    'Sí',
+                                    style: TextStyle(fontSize: 16, color: Colors.white),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red[700],
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                  onPressed: () => Navigator.of(context).pop(true),
+                                ),
+                              ),
+                            ],
+                          )
+
+                        ),
+                      ],
+                    )
                 );
                 if (cerrar == true) Navigator.of(context).pop(true);
               },
@@ -610,7 +939,8 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
             actions: [
               if (!widget.showSolicitudDevolucion)
                 IconButton(
-                  icon: const Icon(Icons.print),
+                  icon: const Icon(Icons.print, size:30),
+                  tooltip: 'Imprimir recibo',
                   onPressed: () {
                     _imprimirRecibo(widget.venta, detalles);
                   },
@@ -626,21 +956,21 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                 if (_selectedDevice != null) ...[
                   Text(
                     "Impresora asignada: ${_selectedDevice!.name ?? _selectedDevice!.address}",
-                    style: const TextStyle(fontSize: 14, fontStyle: FontStyle.italic),
+                    style: const TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
                   ),
                   const SizedBox(height: 12),
                 ],
                 // Resto del ticket: datos de la venta
                 Center(
                   child: Text(
-                    'Agropecuaria El Avión',
+                    'Agropecuaria El Avion',
                     style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
                 ),
                 Center(
                   child: Text(
                     'Perif. Guadalajara-Mazatlan km 7.1 Peñita, Tepic, Nayarit 63167.',
-                    style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                    style: TextStyle(fontSize: 18, color: Colors.grey[700]),
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -653,7 +983,7 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                     Text.rich(
                       TextSpan(
                         text: 'Fecha: ',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                         children: [
                           TextSpan(
                             text: dfDate.format(widget.venta.fecha),
@@ -665,7 +995,7 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                     Text.rich(
                       TextSpan(
                         text: 'Hora: ',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                         children: [
                           TextSpan(
                             text: dfTime.format(widget.venta.fecha),
@@ -680,7 +1010,7 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                 Text.rich(
                   TextSpan(
                     text: 'Folio: ',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     children: [
                       TextSpan(
                         text: widget.venta.folio,
@@ -693,7 +1023,7 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                 Text.rich(
                   TextSpan(
                     text: 'Vendedor: ',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     children: [
                       TextSpan(
                         text: UsuarioActivo.nombre ?? '',
@@ -706,7 +1036,7 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                 Text.rich(
                   TextSpan(
                     text: 'Cliente: ',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     children: [
                       TextSpan(
                         text: widget.venta.clienteNombre ?? 'N/A',
@@ -715,46 +1045,109 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 6),
+                Text.rich(
+                  TextSpan(
+                    text: 'Dirección: ',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    children: [
+                      TextSpan(
+                        text: widget.venta.direccionCliente ?? 'N/A',
+                        style: TextStyle(fontWeight: FontWeight.normal),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text.rich(
+                  TextSpan(
+                    text: 'RFC: ',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    children: [
+                      TextSpan(
+                        text: widget.venta.rfcCliente ?? 'N/A',
+                        style: TextStyle(fontWeight: FontWeight.normal),
+                      ),
+                    ],
+                  ),
+                ),
+
                 const Divider(thickness: 1.5),
                 const SizedBox(height: 8),
 
                 // Tabla de detalle
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    children: const [
-                      SizedBox(width: 48, child: Text('PESO', style: TextStyle(fontWeight: FontWeight.bold))),
-                      Expanded(child: Text('DESCRIPCIÓN', style: TextStyle(fontWeight: FontWeight.bold))),
-                      SizedBox(width: 64, child: Text('IMPORTE', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold))),
-                    ],
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8.0),
+                  child: Center(
+                    child: Text(
+                      'Producto | peso | costo | subTotal',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20, // Tamaño aumentado
+                      ),
+                    ),
                   ),
                 ),
+
+
                 const SizedBox(height: 4),
                 ...detalles.map((d) {
+                  final nombreProducto = d.descripcion ?? 'Producto';
+                  final peso = (d.pesoNeto as num).toStringAsFixed(2);
+                  final precio = '\$${(d.precio as num).toStringAsFixed(2)}';
+                  final subtotal = '\$${(d.subtotal as num).toStringAsFixed(2)}';
+
                   return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Row(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SizedBox(
-                          width: 48,
-                          child: Text(
-                            (d.pesoNeto as num).toStringAsFixed(2),
-                            style: const TextStyle(fontSize: 16),
-                          ),
+                        // Nombre del producto con guiones
+                        Text(
+                          '$nombreProducto',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                         ),
-                        Flexible(
-                          fit: FlexFit.loose,
-                          child: Text(
-                            d.descripcion ?? '',
-                            style: const TextStyle(fontSize: 16),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                          ),
-                        ),
+
+                        const SizedBox(height: 4),
+                        // Segunda línea con peso, costo y subtotal alineados a la derecha
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            SizedBox(
+                              width: 60,
+                              child: Text(
+                                peso,
+                                textAlign: TextAlign.right,
+                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+                              ),
+                            ),
+                            SizedBox(width: 16),
+                            SizedBox(
+                              width: 80,
+                              child: Text(
+                                precio,
+                                textAlign: TextAlign.right,
+                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+                              ),
+                            ),
+                            SizedBox(width: 2),
+                            SizedBox(
+                              width: 100,
+                              child: Text(
+                                subtotal,
+                                textAlign: TextAlign.right,
+                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+                              ),
+                            ),
+                          ],
+                        )
                       ],
                     ),
                   );
                 }).toList(),
+
                 const Divider(thickness: 1.5),
                 const SizedBox(height: 8),
 
@@ -762,16 +1155,23 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                   alignment: Alignment.centerLeft,
                   child: Text(
                     'Forma de pago: ${widget.venta.metodoPago ?? 'N/A'}',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
                 const SizedBox(height: 8),
-
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    'IVA: \$0.0',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                SizedBox(height: 4),
                 Align(
                   alignment: Alignment.centerRight,
                   child: Text(
                     'Total:    \$${total.toStringAsFixed(2)}',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
                 if (widget.venta.idpago == 1) ...[
@@ -779,14 +1179,14 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                     alignment: Alignment.centerRight,
                     child: Text(
                       'Entregado: \$${recibido.toStringAsFixed(2)}',
-                      style: const TextStyle(fontSize: 16),
+                      style: const TextStyle(fontSize: 18),
                     ),
                   ),
                   Align(
                     alignment: Alignment.centerRight,
                     child: Text(
                       'Cambio:   \$${(recibido - total).toStringAsFixed(2)}',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ],
@@ -797,7 +1197,7 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                 const Center(
                   child: Text(
                     'Firma de recibido',
-                    style: TextStyle(fontSize: 16),
+                    style: TextStyle(fontSize: 18),
                     textAlign: TextAlign.center,
                   ),
                 ),

@@ -49,8 +49,8 @@ class VentaDetalleService {
   /// Obtiene todos los detalles de una venta dado su folio
   static Future<List<VentaDetalle>> getByFolio(String folio) async {
     final db = await DBProvider.getDatabase();
-    final rows = await db.rawQuery('''
-    SELECT 
+    final raws = await db.rawQuery(r'''
+    SELECT
       vd.idvd,
       vd.idVenta,
       vd.qr,
@@ -59,18 +59,24 @@ class VentaDetalleService {
       vd.status,
       vd.idproducto,
       vd.folio,
-      p.describcion    AS descripcion   -- nombre de columna de tu tabla producto
+      p.describcion AS descripcion, -- ✅ corregido aquí
+      (
+        SELECT precio
+        FROM precioProducto
+        WHERE idProducto = vd.idproducto
+        ORDER BY fecha DESC
+        LIMIT 1
+      ) AS precio
     FROM ventaDetalle vd
-    JOIN producto p 
-      ON vd.idproducto = p.idproducto
+    JOIN producto p ON vd.idproducto = p.idproducto
     WHERE vd.folio = ?
-    ORDER BY vd.idvd ASC
   ''', [folio]);
 
-    return rows
-        .map((m) => VentaDetalle.fromMap(Map<String, dynamic>.from(m)))
-        .toList();
+    return raws.map((m) => VentaDetalle.fromMap(m)).toList();
   }
+
+
+
 
   /// Actualiza un detalle de venta existente
   static Future<int> updateDetalle(VentaDetalle detalle) async {

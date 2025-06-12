@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:geocoding/geocoding.dart';
 
 import '../BD/database.dart';
 import '../models/cliente.dart';
@@ -45,6 +46,51 @@ class ClienteService {
     final clientes = rawList
         .map((j) => Cliente.fromJson(j as Map<String, dynamic>))
         .toList();
+
+    // Para cada cliente, intentamos extraer ciudad/estado/calleNúmero
+    for (final c in clientes) {
+      // Si no tenemos latitud o longitud, saltamos
+      if (c.latitud == null || c.longitud == null) {
+        c.ciudad = null;
+        c.estado = null;
+        c.calleNumero = null;
+        continue;
+      }
+
+      // Intentamos convertir String → double
+      final lat = double.tryParse(c.latitud!);
+      final lon = double.tryParse(c.longitud!);
+
+      if (lat == null || lon == null) {
+        // La conversión falló: no es un valor válido
+        c.ciudad = null;
+        c.estado = null;
+        c.calleNumero = null;
+        continue;
+      }
+
+      try {
+        // Hacemos reverse geocoding solo si lat/lon son válidos
+        final placemarks = await placemarkFromCoordinates(lat, lon);
+
+        if (placemarks.isNotEmpty) {
+          final place = placemarks.first;
+          c.ciudad      = place.locality;           // ej. "Guadalajara"
+          c.estado      = place.administrativeArea; // ej. "Jalisco"
+          c.calleNumero = place.street;             // ej. "Av. Vallarta 123"
+        } else {
+          // Si no devuelve ningún Placemark
+          c.ciudad = null;
+          c.estado = null;
+          c.calleNumero = null;
+        }
+      } catch (e) {
+        // Si ocurre cualquier excepción en placemarkFromCoordinates:
+        c.ciudad = null;
+        c.estado = null;
+        c.calleNumero = null;
+      }
+    }
 
     await guardarClientesEnLocal(clientes);
     await prefs.setString('clientes_last_sync', DateTime.now().toIso8601String());

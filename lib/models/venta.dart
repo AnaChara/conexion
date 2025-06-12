@@ -1,4 +1,3 @@
-// models/venta.dart
 class Venta {
   final int?      idVenta;
   final DateTime  fecha;
@@ -12,6 +11,10 @@ class Venta {
   final String    metodoPago;
   final double?   cambio;
 
+  // 🆕 Nuevos campos
+  final String?   direccionCliente;
+  final String?   rfcCliente;
+
   Venta({
     this.idVenta,
     required this.fecha,
@@ -24,6 +27,8 @@ class Venta {
     required this.clienteNombre,
     required this.metodoPago,
     this.cambio,
+    this.direccionCliente,
+    this.rfcCliente,
   });
 
   factory Venta.fromMap(Map<String, dynamic> m) {
@@ -31,24 +36,19 @@ class Venta {
       if (v is num) return v.toInt();
       return int.tryParse(v.toString()) ?? 0;
     }
+
     double parseDouble(dynamic v) {
       if (v is num) return v.toDouble();
       return double.tryParse(v.toString()) ?? 0.0;
     }
 
-    // 1) Extraemos el valor crudo de 'fecha' del Map
     final dynamic rawFecha = m['fecha'];
-
-    // 2) Convertimos rawFecha a DateTime, según su tipo
     DateTime fecha;
     if (rawFecha is String) {
-      // Si viene como String (ej. "2025-06-03T10:00:00"), usamos DateTime.parse
       fecha = DateTime.parse(rawFecha);
     } else if (rawFecha is num) {
-      // Si viene como número (milisegundos desde epoch), usamos fromMillisecondsSinceEpoch
       fecha = DateTime.fromMillisecondsSinceEpoch(rawFecha.toInt());
     } else {
-      // Por si acaso viene null o algo inesperado, hacemos un fallback (o lanza excepción)
       fecha = DateTime.tryParse(rawFecha.toString()) ?? DateTime.now();
     }
 
@@ -60,25 +60,22 @@ class Venta {
       idchofer: parseInt(m['idchofer']),
       total: parseDouble(m['total']),
       idpago: parseInt(m['idpago']),
-      pagoRecibido: m['pagoRecibido'] != null
-          ? parseDouble(m['pagoRecibido'])
-          : null,
+      pagoRecibido: m['pagoRecibido'] != null ? parseDouble(m['pagoRecibido']) : null,
       clienteNombre: m['clienteNombre'] as String? ?? '',
-      metodoPago:    m['metodoPago']   as String? ?? 'N/A',
-      cambio: m['cambio'] != null
-          ? parseDouble(m['cambio'])
-          : null,
+      metodoPago: m['metodoPago'] as String? ?? 'N/A',
+      cambio: m['cambio'] != null ? parseDouble(m['cambio']) : null,
+      direccionCliente: m['direccionCliente'] as String?, // 🆕
+      rfcCliente:       m['rfcCliente']       as String?, // 🆕
     );
   }
 
-
   Map<String, dynamic> toMap() => {
-    'fecha':        fecha.millisecondsSinceEpoch,
-    'idcliente':    idcliente,
-    'folio':        folio,
-    'idchofer':     idchofer,
-    'total':        total,
-    'idpago':       idpago,
-    'pagoRecibido': pagoRecibido,
+    'fecha':            fecha.millisecondsSinceEpoch,
+    'idcliente':        idcliente,
+    'folio':            folio,
+    'idchofer':         idchofer,
+    'total':            total,
+    'idpago':           idpago,
+    'pagoRecibido':     pagoRecibido,
   };
 }

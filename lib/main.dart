@@ -1,16 +1,22 @@
 import 'package:conexion/iniciodesesion.dart';
-import 'package:conexion/pruebauno.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:flutter/material.dart';
 import 'actividad.dart';
 import 'package:provider/provider.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('es', null); // ✅ Esto habilita español
+
   runApp(
-    ChangeNotifierProvider(create: (_) => SessionController(),
-    child: const MyApp(),
-    )
+    ChangeNotifierProvider(
+      create: (_) => SessionController(),
+      child: const MyApp(),
+    ),
   );
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -39,6 +45,16 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Color(0xFF3B7D6F),),
 
       ),
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('es', ''), // Español
+        Locale('en', ''), // Inglés (puedes dejarlo)
+      ],
+      locale: const Locale('es'),
       initialRoute: '/',
       routes: {
         '/inicio': (context) => inicio(),
