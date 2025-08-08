@@ -8,6 +8,7 @@ class Chofer {
   final String correo;
   final String contrasena;
   final String? token;
+  final String? prefijoFolio;
 
   Chofer({
     required this.idChofer,
@@ -18,6 +19,7 @@ class Chofer {
     required this.correo,
     required this.contrasena,
     this.token,
+    this.prefijoFolio
   });
 
   factory Chofer.fromMap(Map<String, dynamic> map) => Chofer(
@@ -29,6 +31,7 @@ class Chofer {
     correo:       map['Correo']      as String,
     contrasena:   map['Contrasena']  as String,
     token:        map['Token']       as String?,
+    prefijoFolio: map['prefijoFolio'] as String?
   );
 
   Map<String, dynamic> toMap() => {
@@ -40,6 +43,7 @@ class Chofer {
     'Correo':      correo,
     'Contrasena':  contrasena,
     'Token':       token,
+    'prefijoFolio': prefijoFolio,
   };
 
   @override

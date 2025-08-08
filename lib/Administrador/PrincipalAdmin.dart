@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'CajasA.dart';
-import 'UsuariosA.dart';
-import 'VentasA.dart';
+import 'ChoferA.dart';
 import 'package:conexion/iniciodesesion.dart';
 import 'package:conexion/BD/global.dart';
 import 'dart:async'; //Para implementar la desconexión
@@ -82,6 +80,7 @@ class _principalAdminState extends State<principalAdmin> {
       },
       child: Scaffold(
         appBar: AppBar(
+          backgroundColor: Color(0xFF3B7D6F),
           actions: [
             IconButton(
                 onPressed: (){},
@@ -148,49 +147,7 @@ class _principalAdminState extends State<principalAdmin> {
                     ),
                   ),
                   child: Text(
-                      'Reporte de Inventario General',
-                      style: TextStyle(color: Colors.white)
-                  )
-              ),
-              SizedBox(height: 5,),
-              ElevatedButton(
-                  onPressed: (){},
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Color(0xFF479D8D),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4), // Cambia este valor
-                    ),
-                  ),
-                  child: Text(
-                      'Reporte de Ventas General',
-                      style: TextStyle(color: Colors.white)
-                  )
-              ),
-              SizedBox(height: 5,),
-              ElevatedButton(
-                  onPressed: (){},
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Color(0xFF479D8D),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4), // Cambia este valor
-                    ),
-                  ),
-                  child: Text(
                       'Información',
-                      style: TextStyle(color: Colors.white)
-                  )
-              ),
-              SizedBox(height: 5,),
-              ElevatedButton(
-                  onPressed: (){},
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Color(0xFF479D8D),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4), // Cambia este valor
-                    ),
-                  ),
-                  child: Text(
-                      'Devoluciones',
                       style: TextStyle(color: Colors.white)
                   )
               ),
@@ -217,37 +174,8 @@ class _principalAdminState extends State<principalAdmin> {
             ],
           ),
         ),
-        body: PageView(
-          controller: _pageController,
-          onPageChanged: (index){
-            setState(() {
-              _currentIndex = index;
-            });
-          },
-          children: [
-            cajasA(),
-            ventasA(),
-            usuarios(),
-          ],
-        ) ,
+        body: choferA()
 
-        bottomNavigationBar: BottomNavigationBar(
-            backgroundColor: Color(0xFF3B7D6F),
-            currentIndex: _currentIndex,
-            onTap: (index){
-              setState(() {
-                _currentIndex = index;
-                _pageController.animateToPage(
-                    index, duration: Duration(microseconds: 300), curve: Curves.easeInOut);
-              });
-            },
-
-            items: [
-              BottomNavigationBarItem(icon: Icon(Icons.inbox_outlined), label: 'Cajas'),
-              BottomNavigationBarItem(icon: Icon(Icons.store_mall_directory_outlined), label: 'Ventas'),
-              BottomNavigationBarItem(icon: Icon(Icons.add_circle), label: 'Choferes'),
-            ]
-        ),
       ),
     );
   }

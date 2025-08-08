@@ -77,5 +77,6 @@ class Venta {
     'total':            total,
     'idpago':           idpago,
     'pagoRecibido':     pagoRecibido,
+    'metodoPago':       metodoPago,
   };
 }

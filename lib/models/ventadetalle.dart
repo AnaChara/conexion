@@ -47,5 +47,6 @@ class VentaDetalle {
     'status': status,
     'idproducto': idproducto,
     'folio': folio,
+    'precio': precio,
   };
 }

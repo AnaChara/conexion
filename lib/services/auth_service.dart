@@ -6,14 +6,18 @@ import '../models/chofer.dart'; // 👈 Importamos el modelo
 import '../services/chofer_servise.dart';
 
 class AuthService {
-  static Future<Map<String, dynamic>?> loginApi(String email, String password) async {
+  static Future<Map<String, dynamic>?> loginApi(String email, String password /*, String deviceId*/) async {
     final url = Uri.parse('http://avesyaves.com/saldo/api/auth/login');
 
     try {
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({ 'email': email, 'password': password }),
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+         /* 'device_id':deviceId,*/
+        }),
       );
 
       if (response.statusCode == 200) {

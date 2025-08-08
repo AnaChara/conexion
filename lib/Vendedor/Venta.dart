@@ -18,6 +18,7 @@ import '../services/caja_service.dart';
 import '../services/cliente_services.dart';
 import '../services/ventadetalle_services.dart';
 import 'package:conexion/models/caja.dart';
+import 'dart:convert';
 
 
 
@@ -79,8 +80,10 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
   Future<void> _initClientes() async {
     await ClienteService.syncClientes();
     final lista = await ClienteService.obtenerClientes();
+    if (!mounted) return; // ✅ evita el crash si el widget ya fue eliminado
     setState(() => clientes = lista);
   }
+
 
   Future<void> _buscarClientes() async {
     final datos = await ClienteService.obtenerClientes();
@@ -211,6 +214,22 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
       );
     }
     setState(() {}); // Para redibujar
+  }
+
+  //Generar el folio
+  Future<String> generarFolioVenta() async {
+    final now = DateTime.now();
+    final dia = now.day.toString().padLeft(2, '0');
+    final mes = now.month.toString().padLeft(2, '0');
+    final anio = now.year.toString().substring(2);
+
+    final prefijo = UsuarioActivo.prefijoFolio ?? 'NON';
+
+    // Contamos cuántas ventas existen hoy con ese prefijo
+    final ventasHoy = await VentaService.contarVentasDelDiaPorFolio(prefijo, now);
+
+    final folio = '$prefijo$anio$mes$dia.${ventasHoy + 1}'; // +1 para el siguiente
+    return folio;
   }
 
 // Esto es para filtrar los clientes
@@ -805,7 +824,9 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                               DropdownButton<String>(
                                 isExpanded: true,
                                 hint: Text('Selecciona método'),
-                                value: _selectedPaymentMethod,
+                                value: _paymentOptions.contains(_selectedPaymentMethod)
+                                    ? _selectedPaymentMethod
+                                    : null,
                                 items: _paymentOptions
                                     .map((m) => DropdownMenuItem(value: m, child: Text(m)))
                                     .toList(),
@@ -973,8 +994,7 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                                               onPressed: () async {
                                                 Navigator.of(dialogContext).pop();
 
-                                                final nuevoFolio = 'F${DateTime.now().millisecondsSinceEpoch}';
-
+                                                final nuevoFolio = await generarFolioVenta();
                                                 final ventaObj = Venta(
                                                   fecha: DateTime.now(),
                                                   idcliente: seleccionarcliente!.idcliente,
@@ -997,7 +1017,6 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                                                 );
 
                                                 final nuevoId = await VentaService.insertarVenta(ventaObj);
-
                                                 final ventaConID = Venta(
                                                   idVenta: nuevoId,
                                                   fecha: ventaObj.fecha,
@@ -1018,19 +1037,25 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                                                   final detalle = VentaDetalle(
                                                     qr: d.qr,
                                                     pesoNeto: d.pesoNeto,
-                                                    subtotal: d.importe,
-                                                    status: 'Vendido',
+                                                    subtotal: d.pesoNeto * d.importe,
                                                     idproducto: d.idproducto,
                                                     folio: nuevoFolio,
                                                     descripcion: d.descripcion,
                                                     idVenta: nuevoId,
+                                                    precio: d.importe,
                                                   );
                                                   await VentaDetalleService.insertarDetalle(detalle);
+                                                  // 2) Fuerza el status a 'Vendido'
+                                                  await VentaDetalleService.actualizarStatusPorQR(d.qr, 'Vendido');
+                                                  final detallesGuardados = await VentaDetalleService.getByFolio(nuevoFolio);
+                                                  for (var d in detallesGuardados) {
+                                                    print('🧾 ${d.descripcion} - peso=${d.pesoNeto}, precio=${d.precio}, subtotal=${d.subtotal}');
+                                                  }
                                                 }
+                                                await VentaService().generarJsonSinRepetir(tamanoGrupo: 2);
 
                                                 final ultimaVenta = await VentaService.obtenerUltimaVenta();
-
-                                                Navigator.push<bool>(
+                                                final devolverTrue = await Navigator.push<bool>(
                                                   context,
                                                   MaterialPageRoute(
                                                     builder: (_) => DetalleVentaPage(
@@ -1038,25 +1063,26 @@ class _ventaState extends State<venta> with AutomaticKeepAliveClientMixin<venta>
                                                       showSolicitudDevolucion: false,
                                                     ),
                                                   ),
-                                                ).then((devolverTrue) {
-                                                  if (devolverTrue == true) {
-                                                    setState(() {
-                                                      _detallesEscaneados.clear();
-                                                      seleccionarcliente = null;
-                                                      _selectedPaymentMethod = null;
-                                                      _paymentAmountController.clear();
-                                                      _cajaSeleccionada = null;
-                                                      _mensajeEscaneo = '';
-                                                      _showScanner = false;
-                                                      _puedeEscanear = true;
-                                                      _modoEscaneoActivo = false;
-                                                      _modoEdicion = false;
-                                                      _seleccionados.clear();
-                                                      _scanController.clear();
-                                                      _searchcliente.clear();
-                                                    });
-                                                  }
-                                                });
+                                                );
+
+                                                if (devolverTrue == true) {
+                                                  setState(() {
+                                                    _detallesEscaneados.clear();
+                                                    seleccionarcliente = null;
+                                                    _selectedPaymentMethod = null;
+                                                    _paymentAmountController.clear();
+                                                    _cajaSeleccionada = null;
+                                                    _mensajeEscaneo = '';
+                                                    _showScanner = false;
+                                                    _puedeEscanear = true;
+                                                    _modoEscaneoActivo = false;
+                                                    _modoEdicion = false;
+                                                    _seleccionados.clear();
+                                                    _scanController.clear();
+                                                    _searchcliente.clear();
+                                                  });
+                                                  Navigator.of(context).pop(true);
+                                                }
                                               },
                                             ),
                                           ),

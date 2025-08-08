@@ -1,6 +1,8 @@
 
+import 'package:intl/intl.dart';
 import 'package:sqflite/sqflite.dart';
 import '../BD/database.dart';
+import '../models/caja.dart';
 import '../models/ventadetalle.dart';
 
 class VentaDetalleService {
@@ -127,6 +129,108 @@ class VentaDetalleService {
     );
     return resultados.map((m) => VentaDetalle.fromMap(m)).toList();
   }
+
+  //Función para contar cajas por descripción
+  static Future<Map<String, int>> contarCajasPorDescripcionInventario() async {
+    final db = await DBProvider.getDatabase();
+
+    final resultado = await db.rawQuery('''
+    SELECT p.describcion AS descripcion, COUNT(*) AS cantidad
+    FROM ventaDetalle vd
+    JOIN producto p ON vd.idproducto = p.idproducto
+    WHERE vd.status = 'Inventario'
+    GROUP BY p.describcion
+  ''');
+
+    // Convertimos el resultado en un mapa tipo { "Mango": 5, "Manzana": 3 }
+    final Map<String, int> conteo = {};
+    for (var fila in resultado) {
+      final descripcion = fila['descripcion'] as String;
+      final cantidad = fila['cantidad'] as int;
+      conteo[descripcion] = cantidad;
+    }
+
+    return conteo;
+  }
+
+  //Metodo para obtener las cajas por el id del producto
+  static Future<List<Caja>> getCajasInventarioPorIdProducto(int idProducto) async {
+    final db = await DBProvider.getDatabase();
+    final resultado = await db.rawQuery('''
+    SELECT c.id, c.createe, c.qr, c.folio, c.sync, c.fechaEscaneo
+    FROM ventaDetalle vd
+    JOIN CajasFolioChofer c ON vd.qr = c.qr
+    WHERE vd.idproducto = ? AND vd.status = 'Inventario'
+  ''', [idProducto]);
+
+    return resultado.map((row) => Caja.fromMap(row)).toList();
+  }
+
+  //Actualizar status por QR
+  static Future<void> actualizarStatusPorQR(String qr, String nuevoStatus) async {
+    final db = await DBProvider.getDatabase();
+    await db.update(
+      'ventaDetalle',
+      {'status': nuevoStatus},
+      where: 'qr = ?',
+      whereArgs: [qr],
+    );
+  }
+
+  //Obtener resumen de productos vendidos
+  static Future<List<Map<String, dynamic>>> contarCajasVendidasPorFecha(DateTime fecha) async {
+    final db = await DBProvider.getDatabase();
+    final fechaStr = DateFormat('yyyy-MM-dd').format(fecha);
+
+    final resultado = await db.rawQuery('''
+    SELECT 
+      p.describcion AS descripcion, 
+      COUNT(*) AS cantidad, 
+      SUM(vd.pesoNeto) AS pesoTotal,
+      SUM(vd.subtotal) AS subtotalReal,  -- ✅ esto es lo importante
+      MAX(vd.precio) AS precio
+    FROM ventaDetalle vd
+    JOIN producto p ON vd.idproducto = p.idproducto
+    JOIN Venta v ON v.idVenta = vd.idVenta
+    WHERE vd.status = 'Vendido' 
+      AND strftime('%Y-%m-%d', v.fecha / 1000, 'unixepoch') = ?
+    GROUP BY p.describcion
+  ''', [fechaStr]);
+
+    return resultado;
+  }
+
+
+  //Obtener las cajas por cada venta
+  static Future<int> contarCajasPorIdVenta(int idVenta) async {
+    final db = await DBProvider.getDatabase();
+    final resultado = await db.rawQuery('''
+    SELECT COUNT(*) as total
+    FROM ventaDetalle
+    WHERE idVenta = ? AND status = 'Vendido'
+  ''', [idVenta]);
+
+    return Sqflite.firstIntValue(resultado) ?? 0;
+  }
+
+  //calculando el total xd
+  static Future<double> calcularTotalPorMetodoPago(DateTime fecha, String metodoPago) async {
+    final db = await DBProvider.getDatabase();
+    final fechaStr = DateFormat('yyyy-MM-dd').format(fecha);
+
+    final resultado = await db.rawQuery('''
+    SELECT SUM(vd.subtotal) as total
+    FROM ventaDetalle vd
+    JOIN Venta v ON v.idVenta = vd.idVenta
+    WHERE v.metodoPago = ?
+      AND vd.status = 'Vendido'
+      AND strftime('%Y-%m-%d', v.fecha / 1000, 'unixepoch') = ?
+  ''', [metodoPago, fechaStr]);
+
+    return (resultado.first['total'] as num?)?.toDouble() ?? 0.0;
+  }
+
+
 
 
 }

@@ -109,7 +109,7 @@ class _inicioState extends State<inicio> {
     final idDispositivo = await ChoferService.obtenerIdDispositivo();
 
     // 2) Login con la API (AuthService)
-    final usuario = await AuthService.loginApi(correo, contrasena);
+    final usuario = await AuthService.loginApi(correo, contrasena,/* idDispositivo*/);
     if (usuario == null) {
       return _mostrarError('Correo o contraseña incorrectos');
     }
@@ -126,6 +126,7 @@ class _inicioState extends State<inicio> {
     }
     //Asignamos el id del chofer
     UsuarioActivo.idChofer = choferLocal.idChofer;
+    UsuarioActivo.prefijoFolio = choferLocal.prefijoFolio;
 
 
     // 4) Si es admin, saltamos verificación de dispositivo

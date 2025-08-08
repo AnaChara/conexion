@@ -1,5 +1,9 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'package:conexion/BD/global.dart';
@@ -14,8 +18,13 @@ import '../services/ventadetalle_services.dart';
 import '../models/venta.dart';
 import 'package:intl/intl.dart';
 
+import 'dart:ui' as ui;
+import 'dart:typed_data';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../actividad.dart';
+import 'dart:convert';
+
 
 class ventas extends StatefulWidget {
   const ventas({super.key});
@@ -31,16 +40,24 @@ class _ventasState extends State<ventas> with AutomaticKeepAliveClientMixin<vent
 
   bool cargando = true;
   bool get wantKeepAlive => true;
+  bool mostrarBusqueda = false;
+
+
 
   DateTime? fechaSeleccionada;
 
   //Cargar datos de Ventas
   Future<void> cargarVentas() async {
     setState(() => cargando = true);
-    final correo = UsuarioActivo.correo;
-    if (correo == null) return;
-
-    final raws = await VentaService.obtenerVentasPorCorreo(correo);
+    final idChofer = UsuarioActivo.idChofer;
+    if (idChofer == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: Chofer no identificado.'))
+      );
+      return;
+    }
+    final raws = await VentaService.obtenerVentasPorChofer(idChofer);
     final ventas = raws.map((m) => Venta.fromMap(Map<String, dynamic>.from(m))).toList();
 
     ventas.sort((a, b) => b.fecha.compareTo(a.fecha));
@@ -61,8 +78,6 @@ class _ventasState extends State<ventas> with AutomaticKeepAliveClientMixin<vent
       cargando = false;
     });
   }
-
-
 
   void buscarPorNombre(String query) {
     final filtradas = listaDeDatos.where((venta) {
@@ -120,49 +135,104 @@ class _ventasState extends State<ventas> with AutomaticKeepAliveClientMixin<vent
       child: Scaffold(
         appBar: AppBar(
           automaticallyImplyLeading: false,
-          title: Text('Ventas',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-          actions: [
-            Row(
-              children: [
-                TextButton.icon(
-                  icon: Icon(Icons.calendar_today, size: 28,),
-                  label: Text(fechaSeleccionada != null
-                      ? DateFormat('dd/MM/yyyy').format(fechaSeleccionada!)
-                      : 'Todas las fechas',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Ventas',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              if (fechaSeleccionada != null)
+                Text(
+                  'Fecha: ${DateFormat('dd/MM/yyyy').format(fechaSeleccionada!)}',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.green[800],
                   ),
-                  onPressed: () async {
-                    DateTime? picked = await showDatePicker(
-                      context: context,
-                      initialDate: DateTime.now(),
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime.now(),
-                    );
-
-                    setState(() {
-                      fechaSeleccionada = picked;
-                    });
-                    await cargarVentas();
-                  },
                 ),
-                if (fechaSeleccionada != null)
-                  IconButton(
-                    icon: Icon(Icons.clear),
-                    onPressed: () async {
-                      setState(() {
-                        fechaSeleccionada = null;
-                      });
-                      await cargarVentas();
-                    },
-                  ),
-              ],
+            ],
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.search, size: 32),
+              color: Colors.green[800],
+              tooltip: 'Buscar cliente',
+              onPressed: () {
+                setState(() {
+                  mostrarBusqueda = !mostrarBusqueda;
+                  _searchController.clear();
+                  listaFiltrada = listaDeDatos;
+                });
+              },
             ),
-
+            IconButton(
+              icon: const Icon(Icons.calendar_today, size: 32),
+              color: Colors.green[800],
+              tooltip: 'Seleccionar fecha',
+              onPressed: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: DateTime.now(),
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime.now(),
+                );
+                if (picked != null) {
+                  setState(() {
+                    fechaSeleccionada = picked;
+                  });
+                  await cargarVentas();
+                }
+              },
+            ),
+            if (fechaSeleccionada != null)
+              IconButton(
+                icon: const Icon(Icons.clear, size: 32),
+                color: Colors.green[800],
+                tooltip: 'Quitar filtro',
+                onPressed: () async {
+                  setState(() {
+                    fechaSeleccionada = null;
+                  });
+                  await cargarVentas();
+                },
+              ),
           ],
         ),
+
         body: Column(
           children: [
+            if (mostrarBusqueda)
+              Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Buscar por nombre del cliente...',
+                    filled: true,
+                    fillColor: Colors.grey[200],
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  style: const TextStyle(fontSize: 18),
+                  onChanged: (value) {
+                    setState(() {
+                      listaFiltrada = listaDeDatos.where((venta) =>
+                          venta.clienteNombre.toLowerCase().contains(value.toLowerCase())
+                      ).toList();
+                    });
+                  },
+                  onSubmitted: (value) {
+                    if (value.trim().isEmpty) {
+                      setState(() {
+                        mostrarBusqueda = false;
+                      });
+                    }
+                  },
+                ),
+              ),
             Expanded(
                 child: cargando
                     ? Center(child: CircularProgressIndicator())
@@ -225,16 +295,28 @@ class _ventasState extends State<ventas> with AutomaticKeepAliveClientMixin<vent
         ),
         floatingActionButton: FloatingActionButton(
           heroTag: 'ventasFAB',
-            onPressed: () {
-              Navigator.push(context,
-              MaterialPageRoute(builder: (_)=> venta()));
-            },
-          child: Icon(Icons.add,size: 28),
+          onPressed: () async {
+            final result = await Navigator.push<bool>(
+              context,
+              MaterialPageRoute(builder: (_) => const venta()),
+            );
+
+            if (result == true && mounted) {
+              await cargarVentas();
+            }
+          },
+          child: const Icon(Icons.add, size: 28),
         ),
+
       ),
     );
   }
 }
+
+// --------------------------- Venta Detalle tipo ticket
+//_----------------------------------------------------
+//-----------------------------------------------------
+//----------------------------------------------------
 
 
 class DetalleVentaPage extends StatefulWidget {
@@ -246,15 +328,18 @@ class DetalleVentaPage extends StatefulWidget {
     this.showSolicitudDevolucion = false,
   }) : super(key: key);
 
+
   @override
   State<DetalleVentaPage> createState() => _DetalleVentaPageState();
 }
 
 class _DetalleVentaPageState extends State<DetalleVentaPage> {
   final BlueThermalPrinter _printer = BlueThermalPrinter.instance;
+  final GlobalKey qrKey = GlobalKey(debugLabel: 'qrKeyVenta');
   List<BluetoothDevice> _devices = [];
   BluetoothDevice? _selectedDevice;
   bool _isPrinterConnected = false;
+
 
   @override
   void initState() {
@@ -312,7 +397,7 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                           padding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
-                        onPressed: () => Navigator.of(context).pop(false),
+                        onPressed: () => Navigator.of(context).pop(true),
                       ),
                     ),
                     SizedBox(width: 12), // Espacio entre botones
@@ -369,7 +454,7 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
       Chofer? chofer = await ChoferService.obtenerUsuarioLocal(correo);
       if (chofer != null) {
         String nombreImpresoraEsperada = chofer.impresora;
-        print('🖨️ Impresora esperada: $nombreImpresoraEsperada');
+        print('Impresora esperada: $nombreImpresoraEsperada');
         // Buscamos entre _devices aquel cuyo name o address coincida
         for (BluetoothDevice device in _devices) {
           final deviceName = device.name?.toLowerCase().trim() ?? '';
@@ -377,7 +462,7 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
           final esperado   = nombreImpresoraEsperada.toLowerCase().trim();
 
           if (deviceName == esperado || deviceAddr == esperado) {
-            print('✅ Impresora encontrada: ${device.name} / ${device.address}');
+            print('Impresora encontrada: ${device.name} / ${device.address}');
             _selectedDevice = device;
             break;
           }
@@ -390,136 +475,168 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
     setState(() {});
   }
 
-  // Intenta conectar al dispositivo seleccionado si aún no está conectado.
-  Future<void> _connectPrinter() async {
-    if (_selectedDevice == null) {
-      throw Exception('No se encontró impresora asignada al chofer');
-    }
-    bool? alreadyConnected = await _printer.isConnected;
-    if (alreadyConnected == true) {
-      _isPrinterConnected = true;
-      return;
-    }
-    await _printer.connect(_selectedDevice!);
-    _isPrinterConnected = true;
-  }
-
   double _toDoubleSafe(dynamic n) => (n as num?)?.toDouble() ?? 0.0;
 
 
-  String quitarAcentos(String texto) {
-    const acentos = 'áéíóúÁÉÍÓÚñÑüÜ';
-    const reemplazos = 'aeiouAEIOUnNuU';
+  Future<void> setCodigoLatin1() async {
+    // Comando ESC t n → 27, 116, n → 27 116 16 (tabla Latin1)
+    final List<int> comando = [27, 116, 16];
+    _printer.writeBytes(Uint8List.fromList(comando));
+  }
 
-    return texto.split('').map((c) {
-      final index = acentos.indexOf(c);
-      return index != -1 ? reemplazos[index] : c;
-    }).join();
+  Future<Uint8List> buildQrPng(String data, {double size = 256.0}) async {
+    final painter = QrPainter(
+      data: data,
+      version: QrVersions.auto,
+      gapless: true,
+      color: const Color(0xFF000000),
+      emptyColor: const Color(0xFFFFFFFF),
+    );
+
+    final ui.Image img = await painter.toImage(size); // size es double
+    final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  }
+
+  //RECETEAR LA IMPRESORA
+  Future<void> _initPrinterMode() async {
+    // ESC @  -> reset
+    await _printer.writeBytes(Uint8List.fromList([27, 64]));
+    // Línea por defecto
+    await _printer.writeBytes(Uint8List.fromList([27, 50]));
+  }
+
+  Future<File> _buildQrFile(String data) async {
+    final png = await buildQrPng(data, size: 150.0); // antes 256.0
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/qr_${DateTime.now().millisecondsSinceEpoch}.png');
+    await file.writeAsBytes(png, flush: true);
+    return file;
+  }
+
+
+  Future<void> _slowPrint(void Function() fn, [int ms = 70]) async {
+    fn();
+    await Future.delayed(Duration(milliseconds: ms));
+  }
+
+// Reintento si se rompe el socket ("Broken pipe")
+  Future<T> _withReconnect<T>(Future<T> Function() op) async {
+    try {
+      return await op();
+    } catch (e) {
+      if (e.toString().contains('Broken pipe')) {
+        try { await _printer.disconnect(); } catch (_) {}
+        await Future.delayed(const Duration(milliseconds: 300));
+        await _printer.connect(_selectedDevice!);
+        await Future.delayed(const Duration(milliseconds: 200));
+        await setCodigoLatin1(); // reset borró la codepage
+        return await op(); // reintento 1
+      }
+      rethrow;
+    }
+  }
+
+
+  void imprimirTextoCompatible(String texto) {
+    final bytes = latin1.encode(texto);
+    _printer.writeBytes(Uint8List.fromList(bytes));
+    _printer.printNewLine();
   }
 
   //Contenido para la impresión
   Future<void> _printTicketContent(Venta venta, List<VentaDetalle> detalles) async {
     final dfDate = DateFormat('yyyy-MM-dd');
     final dfTime = DateFormat('HH:mm');
-    String fechaStr = dfDate.format(venta.fecha);
-    String horaStr = dfTime.format(venta.fecha);
+    final fechaStr = dfDate.format(venta.fecha);
+    final horaStr  = dfTime.format(venta.fecha);
 
-    // Cabecera
-    _printer.printNewLine();
-    _printer.printCustom("Agropecuaria El Avión", 2, 1);
-    _printer.printNewLine();
-    _printer.printCustom("Perif. Guada-Maza km 7.1", 1, 1);
-    _printer.printCustom("Penita, Tepic, Nayarit 63167", 1, 1);
-    _printer.printNewLine();
+    await _slowPrint(() => _printer.printNewLine());
+    await setCodigoLatin1();
+    await _slowPrint(() => imprimirTextoCompatible("Agropecuaria El Avion")); // sin acento por seguridad
+    await _slowPrint(() => _printer.printCustom("Perif. Guada-Maza km 7.1", 1, 1));
+    await setCodigoLatin1();
+    await _slowPrint(() => imprimirTextoCompatible("Penita, Tepic, Nayarit 63167")); // evita 'ñ' si te da guerra
+    await _slowPrint(() => _printer.printCustom("RFC: AAV8705296P4", 1, 1));
+    await _slowPrint(() => _printer.printNewLine());
 
-    // Fecha y hora
-    _printer.printLeftRight("F: $fechaStr", "H: $horaStr", 1);
-    _printer.printNewLine();
+    await _slowPrint(() => _printer.printCustom("Fecha: $fechaStr    Hora: $horaStr", 1, 1));
+    await _slowPrint(() => _printer.printCustom("Folio: ${venta.folio}", 1, 0));
+    await _slowPrint(() => _printer.printCustom("Vendedor: ${UsuarioActivo.nombre ?? ''}", 1, 0));
+    await _slowPrint(() => _printer.printNewLine());
 
-    // Folio y vendedor
-    _printer.printCustom("Folio: ${venta.folio}", 1, 0);
-    _printer.printCustom("Vendedor: ${UsuarioActivo.nombre ?? ''}", 1, 0);
-    _printer.printNewLine();
+    await setCodigoLatin1();
+    await _slowPrint(() => imprimirTextoCompatible("Cliente: ${venta.clienteNombre ?? 'N/A'}"));
+    await _slowPrint(() => imprimirTextoCompatible("Direccion: ${venta.direccionCliente ?? 'N/A'}"));
+    await _slowPrint(() => _printer.printCustom("RFC: ${venta.rfcCliente ?? 'N/A'}", 1, 0));
 
-    // Cliente
-    _printer.printCustom("Cliente: ${quitarAcentos(venta.clienteNombre ?? 'N/A')}", 1, 0);
-    _printer.printCustom("Direccion: ${quitarAcentos(venta.direccionCliente ?? 'N/A')}", 1, 0);
-    // NUEVO: RFC
-    _printer.printCustom("RFC: ${venta.rfcCliente ?? 'N/A'}", 1, 0);
+    await _slowPrint(() => _printer.printNewLine());
+    await _slowPrint(() => _printer.printCustom("--------------------------------", 1, 1));
 
-    _printer.printNewLine();
-    _printer.printCustom("--------------------------------", 1, 1);
+    // Encabezados
+    const int ancho1 = 10, ancho2 = 5, ancho3 = 7, ancho4 = 10;
+    final headerLine = "Producto".padRight(ancho1) +
+        "Peso".padRight(ancho2) +
+        "Costo".padRight(ancho3) +
+        "subTotal".padRight(ancho4);
+    await _slowPrint(() => _printer.printCustom(headerLine, 1, 1));
+    await _slowPrint(() => _printer.printCustom("--------------------------------", 1, 1));
 
-    // Encabezados columnas
-    const int anchoTotal = 32;
-
-    String col1 = "Producto";
-    String col2 = "Peso";
-    String col3 = "Costo";
-    String col4 = "subTotal";
-
-// Asignamos longitud fija a cada columna para que cuadre con 32
-    int ancho1 = 10; // Producto
-    int ancho2 = 5;  // Peso
-    int ancho3 = 7;  // Costo
-    int ancho4 = 10; // subTotal
-
-    String headerLine =
-        col1.padRight(ancho1) +
-            col2.padRight(ancho2) +
-            col3.padRight(ancho3) +
-            col4.padRight(ancho4);
-
-    _printer.printCustom(headerLine, 1, 1);
-    _printer.printCustom("--------------------------------", 1, 1);
-
-    // Filas de detalle
     for (final d in detalles) {
-      final peso = (d.pesoNeto as num).toStringAsFixed(2);
-      final precio = "\$${(d.precio as num).toStringAsFixed(2)}";
-      final subtotal = "\$${(d.subtotal as num).toStringAsFixed(2)}";
-      String desc = d.descripcion ?? 'Producto';
+      final pesoDouble     = _toDoubleSafe(d.pesoNeto);
+      final precioDouble   = _toDoubleSafe(d.precio);
+      final subtotalDouble = pesoDouble * precioDouble;
 
-      // 👉 Limita descripción a una sola línea legible
-      if (desc.length > 30) {
-        desc = desc.substring(0, 27) + '...';
-      }
+      final peso     = pesoDouble.toStringAsFixed(2);
+      final precio   = "\$${precioDouble.toStringAsFixed(2)}";
+      final subtotal = "\$${subtotalDouble.toStringAsFixed(2)}";
 
-      // 🖨 Línea 1: descripción
-      _printer.printCustom(desc, 1, 0); // alineado a la izquierda
+      var desc = d.descripcion ?? 'Producto';
+      if (desc.length > 30) desc = desc.substring(0, 27) + '...';
 
-      // 🖨 Línea 2: peso - precio - subtotal, con espacio entre cada uno
+      await _slowPrint(() => _printer.printCustom(desc, 1, 0));
+
       final espacio1 = 10 - peso.length;
       final espacio2 = 10 - precio.length;
+      final lineaValores = peso + ' ' * espacio1 + precio + ' ' * espacio2 + subtotal;
 
-      final lineaValores =
-          peso + ' ' * espacio1 +
-              precio + ' ' * espacio2 +
-              subtotal;
-
-      _printer.printCustom(lineaValores, 1, 0); // alineado a la izquierda
-      _printer.printNewLine();
+      await _slowPrint(() => _printer.printCustom(lineaValores, 1, 0));
+      await _slowPrint(() => _printer.printNewLine(), 40);
     }
 
+    await _slowPrint(() => _printer.printCustom("--------------------------------", 1, 1));
 
-    _printer.printCustom("--------------------------------", 1, 1);
-
-    // Totales (IVA fijo 0.00)
-    double total = _toDoubleSafe(venta.total);
-    double recibido = _toDoubleSafe(venta.pagoRecibido);
-    _printer.printLeftRight("IVA:", "\$0.00", 1);
-    _printer.printLeftRight("Total:", "\$${total.toStringAsFixed(2)}", 1);
+    final total    = _toDoubleSafe(venta.total);
+    final recibido = _toDoubleSafe(venta.pagoRecibido);
+    await _slowPrint(() => _printer.printLeftRight("IVA:", "\$0.00", 1));
+    await _slowPrint(() => _printer.printLeftRight("Total:", "\$${total.toStringAsFixed(2)}", 1));
     if (venta.idpago == 1) {
-      _printer.printLeftRight("Entregado:", "\$${recibido.toStringAsFixed(2)}", 1);
-      _printer.printLeftRight("Cambio:", "\$${(recibido - total).toStringAsFixed(2)}", 1);
+      await _slowPrint(() => _printer.printLeftRight("Entregado:", "\$${recibido.toStringAsFixed(2)}", 1));
+      await _slowPrint(() => _printer.printLeftRight("Cambio:", "\$${(recibido - total).toStringAsFixed(2)}", 1));
     }
-    _printer.printNewLine();
-    _printer.printNewLine();
-    _printer.printCustom("------------------------------", 1, 1);
-    _printer.printCustom("Firma de recibido", 1, 1);
-    _printer.printNewLine();
-    _printer.printNewLine();
+
+    await _slowPrint(() => _printer.printNewLine());
+    await _slowPrint(() => _printer.printNewLine());
+    await _slowPrint(() => _printer.printCustom("------------------------------", 1, 1));
+    await _slowPrint(() => _printer.printCustom("Firma de recibido", 1, 1));
+    await _slowPrint(() => _printer.printNewLine());
+    await _slowPrint(() => _printer.printNewLine());
+
+    // QR (con reintento y pausas)
+    await _withReconnect(() async {
+      await _initPrinterMode();                // reset
+      await Future.delayed(const Duration(milliseconds: 200));
+      await setCodigoLatin1();                 // reset borró codepage
+
+      final qrFile = await _buildQrFile(venta.folio);
+      await _slowPrint(() => _printer.printImage(qrFile.path), 140);
+      await _slowPrint(() => _printer.printNewLine(), 120);
+      return 0;
+    });
+    await _slowPrint(() => _printer.printNewLine());
+    await _slowPrint(() => _printer.printNewLine());
   }
+
 
   // Función que genera y envía el ticket a la impresora asignada.
   Future<void> _imprimirRecibo(Venta venta, List<VentaDetalle> detalles) async {
@@ -542,8 +659,7 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
               ],
             ),
             content: const Text(
-              'No se encontró ninguna impresora configurada para este chofer.\n\n'
-                  'Por favor, verifica la configuración en el apartado de impresoras.',
+              'No se encontró ninguna impresora configurada para este chofer.',
               style: TextStyle(fontSize: 16),
               textAlign: TextAlign.justify,
             ),
@@ -577,6 +693,8 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
         await _printer.connect(_selectedDevice!);
       }
       _isPrinterConnected = true;
+      await Future.delayed(const Duration(milliseconds: 200));
+      await setCodigoLatin1(); // <- muy importante tras conectar
     } catch (_) {
       await showDialog(
         context: context,
@@ -671,6 +789,8 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
     // 4) Imprimir la primera copia
     try {
       await _printTicketContent(venta, detalles);
+      await Future.delayed(Duration(seconds: 1));
+
     } catch (e) {
       // Si falla la primera copia, mostramos error y salimos
       await showDialog(
@@ -936,6 +1056,7 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                 if (cerrar == true) Navigator.of(context).pop(true);
               },
             ),
+
             actions: [
               if (!widget.showSolicitudDevolucion)
                 IconButton(
@@ -1093,9 +1214,15 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                 const SizedBox(height: 4),
                 ...detalles.map((d) {
                   final nombreProducto = d.descripcion ?? 'Producto';
-                  final peso = (d.pesoNeto as num).toStringAsFixed(2);
-                  final precio = '\$${(d.precio as num).toStringAsFixed(2)}';
-                  final subtotal = '\$${(d.subtotal as num).toStringAsFixed(2)}';
+                  final double pesoDouble = _toDoubleSafe(d.pesoNeto);
+                  final double precioPorKilo = _toDoubleSafe(d.precio);
+
+                  final double subtotalDouble = pesoDouble * precioPorKilo;
+                  final subtotal = "\$${subtotalDouble.toStringAsFixed(2)}";
+
+                  final peso = pesoDouble.toStringAsFixed(2);
+                  final precio = "\$${precioPorKilo.toStringAsFixed(2)}";
+
 
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -1201,7 +1328,25 @@ class _DetalleVentaPageState extends State<DetalleVentaPage> {
                     textAlign: TextAlign.center,
                   ),
                 ),
-                const SizedBox(height: 48),
+                const SizedBox(height: 16),
+                Center(
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 8),
+                      RepaintBoundary(
+                        key: qrKey,
+                        child: QrImageView(
+                          data: widget.venta.folio,
+                          version: QrVersions.auto,
+                          size: 100,
+                          backgroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const SizedBox(height: 32),
                 if (widget.showSolicitudDevolucion) ...[
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,

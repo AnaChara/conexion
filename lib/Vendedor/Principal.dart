@@ -1,11 +1,14 @@
+import 'package:conexion/Vendedor/Inventario.dart';
 import 'package:flutter/material.dart';
 import 'Cajas.dart';
+import 'Reportev.dart';
 import 'Venta.dart';
 import 'Ventas.dart';
 import 'package:conexion/iniciodesesion.dart';
 import 'package:conexion/BD/global.dart';
 import 'package:conexion/actividad.dart';
 import 'package:provider/provider.dart';
+import 'Inventario.dart';
 import 'dart:async';
 
 class principal extends StatefulWidget {
@@ -19,6 +22,8 @@ class _principalState extends State<principal> {
   //Variables
   int _currentIndex = 0;
   late PageController _pageController;
+  final GlobalKey<InventarioState> _inventarioKey = GlobalKey<InventarioState>();
+
 
   @override
   void initState() { //Inicializar recursos o configuraciones
@@ -84,11 +89,6 @@ class _principalState extends State<principal> {
         appBar: AppBar(
           backgroundColor: Color(0xFF3B7D6F),
           actions: [
-
-            IconButton(
-                onPressed: (){},
-                icon: Icon(Icons.notifications)
-            ),
             Builder(
                 builder: (context) => IconButton(
                     onPressed: (){
@@ -142,21 +142,12 @@ class _principalState extends State<principal> {
               ),
               SizedBox(height: 5,),
               ElevatedButton(
-                  onPressed: (){},
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Color(0xFF479D8D),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4), // Cambia este valor
-                    ),
-                  ),
-                  child: Text(
-                      'Reporte de Inventario',
-                      style: TextStyle(color: Colors.white)
-                  )
-              ),
-              SizedBox(height: 5,),
-              ElevatedButton(
-                  onPressed: (){},
+                  onPressed: (){
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const reporteventa()),
+                    );
+                  },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Color(0xFF479D8D),
                     shape: RoundedRectangleBorder(
@@ -165,20 +156,6 @@ class _principalState extends State<principal> {
                   ),
                   child: Text(
                       'Reporte de Ventas',
-                      style: TextStyle(color: Colors.white)
-                  )
-              ),
-              SizedBox(height: 5,),
-              ElevatedButton(
-                  onPressed: (){},
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Color(0xFF479D8D),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4), // Cambia este valor
-                    ),
-                  ),
-                  child: Text(
-                      'Devoluciones',
                       style: TextStyle(color: Colors.white)
                   )
               ),
@@ -221,36 +198,51 @@ class _principalState extends State<principal> {
         ),
         body: PageView(
           controller: _pageController,
-          onPageChanged: (index){
+          onPageChanged: (index) async {
             setState(() {
               _currentIndex = index;
             });
+
+            // Si regresa a la pestaña Inventario, refrescamos
+            if (index == 0) {
+              await Future.delayed(Duration(milliseconds: 100)); // pequeño retraso para que termine el cambio de pestaña
+              _inventarioKey.currentState?.cargarInventario();
+            }
           },
+
           children: [
+            Inventario(key: _inventarioKey),
             cajas(),
             ventas(),
-            venta(),
           ],
         ) ,
 
-        bottomNavigationBar: BottomNavigationBar(
-            backgroundColor: Color(0xFF3B7D6F),
-            currentIndex: _currentIndex,
-            onTap: (index){
-              setState(() {
-                _currentIndex = index;
-                _pageController.animateToPage(
-                    index, duration: Duration(microseconds: 300), curve: Curves.easeInOut);
-              });
-            },
+         bottomNavigationBar: BottomNavigationBar(
+           backgroundColor: Color(0xFF3B7D6F),
+           selectedItemColor: Colors.white,
+           unselectedItemColor: Colors.white70,
+           selectedLabelStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+           unselectedLabelStyle: TextStyle(fontSize: 12),
+           currentIndex: _currentIndex,
+           onTap: (index) async {// Cambiar normalmente entre pestañas
+               setState(() {
+                 _currentIndex = index;
+                 _pageController.animateToPage(
+                   index,
+                   duration: const Duration(milliseconds: 300),
+                   curve: Curves.easeInOut,
+                 );
+               });
 
-            items: [
-              BottomNavigationBarItem(icon: Icon(Icons.inbox_outlined), label: 'Cajas'),
-              BottomNavigationBarItem(icon: Icon(Icons.store_mall_directory_outlined), label: 'Ventas'),
-              BottomNavigationBarItem(icon: Icon(Icons.add_circle), label: 'Venta'),
-            ]
-        ),
-      ),
+           },
+           type: BottomNavigationBarType.fixed, // importante para más de 3 ítems
+           items: const [
+             BottomNavigationBarItem(icon: Icon(Icons.inventory_2_outlined), label: 'Inventario'),
+             BottomNavigationBarItem(icon: Icon(Icons.input_outlined), label: 'Entradas'),
+             BottomNavigationBarItem(icon: Icon(Icons.store_mall_directory_outlined), label: 'Ventas'),
+           ],
+         ),
+       ),
     );
   }
 }
